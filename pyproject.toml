@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drumgen"
+version = "0.1.0"
+description = "Gerador de bateria expressiva condicionado por estilo, treinado no Groove MIDI Dataset"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib",
+    "miditok",
+    "muspy",
+    "numpy",
+    "pandas",
+    "pretty-midi",
+    "pyyaml",
+    "scipy",
+    "symusic",
+    "torch",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pyright"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
