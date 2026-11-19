@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from drumgen.config import ExperimentConfig, PieceType, Style
+from drumgen.config import ExperimentConfig, PathSettings, PieceType, Split, Style
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -68,3 +68,44 @@ def test_wrong_type_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(TypeError, match="num_velocities"):
         ExperimentConfig.from_yaml(config_file)
+
+
+@pytest.mark.parametrize(
+    ("gmd_split", "expected"), [("train", Split.TRAIN), ("validation", Split.VAL), ("test", Split.TEST)]
+)
+def test_split_comes_from_gmd_split_column(gmd_split: str, expected: Split) -> None:
+    assert Split.from_gmd(gmd_split) is expected
+
+
+def test_debug_config_selects_a_subset_into_its_own_folder() -> None:
+    config = ExperimentConfig.from_yaml(REPO_ROOT / "configs" / "debug.yaml")
+
+    assert config.prepare.pieces_per_split is not None
+    assert config.paths.processed_dir != PathSettings().processed_dir
+
+
+def test_full_prepare_has_no_subset() -> None:
+    assert ExperimentConfig(name="x").prepare.pieces_per_split is None
+
+
+def test_optional_int_accepts_null_and_int(tmp_path: Path) -> None:
+    config_file = tmp_path / "cfg.yaml"
+    config_file.write_text("name: x\nprepare:\n  pieces_per_split: 4\n")
+
+    assert ExperimentConfig.from_yaml(config_file).prepare.pieces_per_split == 4
+
+
+def test_processed_layout_follows_the_contract(tmp_path: Path) -> None:
+    paths = PathSettings(processed_dir=tmp_path)
+
+    assert paths.tokenizer_file == tmp_path / "tokenizer.json"
+    assert paths.pieces_file == tmp_path / "pieces.csv"
+    assert paths.stats_file == tmp_path / "stats.json"
+    assert paths.split_file(Split.VAL) == tmp_path / "val.npz"
+    assert paths.reference_dir(Split.TEST, Style.JAZZ) == tmp_path / "reference" / "test" / "jazz"
+
+
+def test_cli_reads_the_config_flag() -> None:
+    config = ExperimentConfig.from_cli("teste", ["--config", str(REPO_ROOT / "configs" / "debug.yaml")])
+
+    assert config.name == "debug"

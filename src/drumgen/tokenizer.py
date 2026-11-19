@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 from miditok import PerTok, TokenizerConfig, TokSequence
 from symusic.core import NoteTick, ScoreTick, TrackTick
@@ -49,6 +50,12 @@ class DrumTokenizer:
             token_id for token, token_id in vocab.items() if token.startswith("MicroTiming_")
         }
         self._special_ids = {self.pad_id, self.bos_id, self.eos_id}
+        self._velocity_ids = {
+            int(token.removeprefix("Velocity_")): token_id
+            for token, token_id in vocab.items()
+            if token.startswith("Velocity_")
+        }
+        self._velocity_of = {token_id: velocity for velocity, token_id in self._velocity_ids.items()}
 
     @classmethod
     def from_settings(cls, settings: TokenizerSettings) -> DrumTokenizer:
@@ -69,6 +76,13 @@ class DrumTokenizer:
             use_position_toks=True,
         )
         return cls(PerTok(config))
+
+    @classmethod
+    def from_file(cls, path: Path) -> DrumTokenizer:
+        return cls(PerTok(params=path))
+
+    def save(self, path: Path) -> None:
+        self._pertok.save(path)
 
     @property
     def vocab_size(self) -> int:
@@ -93,6 +107,9 @@ class DrumTokenizer:
     def token_of(self, token_id: int) -> str:
         return self._tokens[token_id]
 
+    def id_of(self, token: str) -> int:
+        return self._ids[token]
+
     def map_drums(self, score: ScoreTick) -> ScoreTick:
         mapped = ScoreTick(score.ticks_per_quarter)
         track = TrackTick("Drums", 0, True)
@@ -115,7 +132,12 @@ class DrumTokenizer:
 
     def decode(self, ids: Sequence[int]) -> ScoreTick:
         sequence = TokSequence(ids=[token_id for token_id in ids if token_id not in self._special_ids])
-        return self._pertok.decode([sequence], programs=[(0, True)])
+        score = self._pertok.decode([sequence], programs=[(0, True)])
+        for track in score.tracks:
+            for note in track.notes:
+                if note.time < 0:
+                    note.time = 0
+        return score
 
     def quantize(self, ids: Sequence[int]) -> list[int]:
         on_grid = self._ids.get("MicroTiming_0")
@@ -128,3 +150,18 @@ class DrumTokenizer:
         if not content:
             return 0
         return content.count(self.bar_id) + 1
+
+    def bar_starts(self, sequence: Sequence[int]) -> list[int]:
+        return [
+            index
+            for index, token_id in enumerate(sequence)
+            if token_id == self.bar_id or (index == 0 and token_id == self.bos_id)
+        ]
+
+    def scale_velocities(self, ids: Sequence[int], factor: float) -> list[int]:
+        levels = sorted(self._velocity_ids)
+        rescaled = {
+            token_id: self._velocity_ids[min(levels, key=lambda level: abs(level - velocity * factor))]
+            for token_id, velocity in self._velocity_of.items()
+        }
+        return [rescaled.get(token_id, token_id) for token_id in ids]

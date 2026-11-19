@@ -148,3 +148,60 @@ def test_disabling_microtiming_removes_microtiming_tokens() -> None:
     ids = tokenizer.encode(ScoreTick(FIXTURES / "funk_117_beat.mid"))
 
     assert not any(tokenizer.token_of(token_id).startswith("MicroTiming_") for token_id in ids)
+
+
+def test_saved_tokenizer_reloads_with_the_same_vocabulary(tokenizer: DrumTokenizer, tmp_path: Path) -> None:
+    tokenizer.save(tmp_path / "tokenizer.json")
+
+    reloaded = DrumTokenizer.from_file(tmp_path / "tokenizer.json")
+
+    score = ScoreTick(FIXTURES / "funk_117_beat.mid")
+    assert reloaded.vocab_size == tokenizer.vocab_size
+    assert reloaded.encode(score) == tokenizer.encode(score)
+
+
+def test_bar_starts_are_the_bos_and_every_bar_token(tokenizer: DrumTokenizer) -> None:
+    ids = tokenizer.encode(drum_score([(0, 36), (BAR, 38), (2 * BAR + SIXTEENTH, 42)]))
+    sequence = [tokenizer.bos_id, *ids, tokenizer.eos_id]
+
+    starts = tokenizer.bar_starts(sequence)
+
+    assert starts[0] == 0
+    assert [tokenizer.token_of(sequence[index]) for index in starts[1:]] == ["Bar_None", "Bar_None"]
+
+
+def test_decode_clamps_a_rushed_first_downbeat_to_tick_zero(tokenizer: DrumTokenizer) -> None:
+    ids = [tokenizer.id_of(token) for token in ["PitchDrum_36", "MicroTiming_-30", "Velocity_95"]]
+
+    decoded = tokenizer.decode(ids)
+
+    assert [note.time for note in decoded.tracks[0].notes] == [0]
+
+
+def test_velocity_scaling_only_rewrites_velocity_tokens(tokenizer: DrumTokenizer) -> None:
+    ids = tokenizer.encode(ScoreTick(FIXTURES / "funk_117_beat.mid"))
+
+    scaled = tokenizer.scale_velocities(ids, 1.15)
+
+    changed = [(before, after) for before, after in zip(ids, scaled, strict=True) if before != after]
+    assert changed
+    assert all(
+        tokenizer.token_of(before).startswith("Velocity_") and tokenizer.token_of(after).startswith("Velocity_")
+        for before, after in changed
+    )
+
+
+@pytest.mark.parametrize(
+    ("token", "factor", "expected"),
+    [("Velocity_119", 1.15, "Velocity_127"), ("Velocity_7", 0.85, "Velocity_7"), ("Velocity_63", 0.85, "Velocity_55")],
+)
+def test_velocity_scaling_snaps_to_the_nearest_level(
+    tokenizer: DrumTokenizer, token: str, factor: float, expected: str
+) -> None:
+    assert tokenizer.scale_velocities([tokenizer.id_of(token)], factor) == [tokenizer.id_of(expected)]
+
+
+def test_velocity_scaling_by_one_is_identity(tokenizer: DrumTokenizer) -> None:
+    ids = tokenizer.encode(ScoreTick(FIXTURES / "jazz_120_beat.mid"))
+
+    assert tokenizer.scale_velocities(ids, 1.0) == ids
