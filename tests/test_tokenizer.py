@@ -108,6 +108,42 @@ def test_decode_ignores_special_tokens(tokenizer: DrumTokenizer) -> None:
     assert [note.pitch for note in decoded.tracks[0].notes] == [36, 42]
 
 
+def test_decode_counts_note_tokens_the_decoder_could_not_form(tokenizer: DrumTokenizer) -> None:
+    tokens = [
+        "Position_0",
+        "PitchDrum_36",
+        "MicroTiming_0",
+        "Velocity_103",
+        "PitchDrum_38",
+        "Velocity_103",
+        "Pitch_60",
+        "MicroTiming_0",
+        "Velocity_63",
+        "Position_480",
+        "Pitch_61",
+        "Velocity_63",
+        "PitchDrum_42",
+    ]
+
+    decoded = tokenizer.decode_with_dropped_notes([tokenizer.bos_id, *(tokenizer.id_of(token) for token in tokens)])
+
+    assert sorted(note.pitch for note in decoded.score.tracks[0].notes) == [36, 60]
+    assert decoded.dropped_notes == 3
+
+
+def test_well_formed_sequence_drops_no_note(tokenizer: DrumTokenizer) -> None:
+    ids = tokenizer.encode(ScoreTick(FIXTURES / "jazz_120_beat.mid"))
+
+    decoded = tokenizer.decode_with_dropped_notes([tokenizer.bos_id, *ids, tokenizer.eos_id])
+
+    assert decoded.dropped_notes == 0
+    assert decoded.score.note_num() == tokenizer.decode(ids).note_num()
+
+
+def test_dropped_notes_of_an_empty_sequence_is_zero(tokenizer: DrumTokenizer) -> None:
+    assert tokenizer.decode_with_dropped_notes([tokenizer.bos_id, tokenizer.eos_id]).dropped_notes == 0
+
+
 def test_quantize_only_rewrites_microtiming_tokens(tokenizer: DrumTokenizer) -> None:
     ids = tokenizer.encode(ScoreTick(FIXTURES / "jazz_120_beat.mid"))
 

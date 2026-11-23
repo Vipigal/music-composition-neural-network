@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from miditok import PerTok, TokenizerConfig, TokSequence
@@ -36,6 +37,13 @@ DRUM_CLASSES: dict[int, int] = {
 }
 
 SPECIAL_TOKENS = ["PAD", "BOS", "EOS"]
+NOTE_TOKEN_PREFIXES = ("PitchDrum_", "Pitch_")
+
+
+@dataclass(frozen=True)
+class DecodedScore:
+    score: ScoreTick
+    dropped_notes: int
 
 
 class DrumTokenizer:
@@ -50,6 +58,7 @@ class DrumTokenizer:
             token_id for token, token_id in vocab.items() if token.startswith("MicroTiming_")
         }
         self._special_ids = {self.pad_id, self.bos_id, self.eos_id}
+        self._note_ids = {token_id for token, token_id in vocab.items() if token.startswith(NOTE_TOKEN_PREFIXES)}
         self._velocity_ids = {
             int(token.removeprefix("Velocity_")): token_id
             for token, token_id in vocab.items()
@@ -138,6 +147,11 @@ class DrumTokenizer:
                 if note.time < 0:
                     note.time = 0
         return score
+
+    def decode_with_dropped_notes(self, ids: Sequence[int]) -> DecodedScore:
+        score = self.decode(ids)
+        note_tokens = sum(token_id in self._note_ids for token_id in ids)
+        return DecodedScore(score=score, dropped_notes=max(note_tokens - score.note_num(), 0))
 
     def quantize(self, ids: Sequence[int]) -> list[int]:
         on_grid = self._ids.get("MicroTiming_0")
