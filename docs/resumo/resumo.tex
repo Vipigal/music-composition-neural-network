@@ -1,0 +1,47 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazilian]{babel}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+% espaçamento 1,5 (mesmo fator que o \onehalfspacing do pacote setspace usa em 11pt)
+\pagestyle{empty}
+\linespread{1.213}\selectfont
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+\begin{center}
+{\large\bfseries Geração de bateria expressiva condicionada por estilo com Transformer e \textit{classifier-free guidance}}
+
+\vspace{0.6em}
+Renato Gabino Diniz, Isadora Cunha Pimentel, Vinicius Pinho Galvão
+
+Universidade Federal de Minas Gerais (UFMG) -- Departamento de Ciência da Computação\\
+DCC831 -- IA Generativa para Música -- 2026/2
+\end{center}
+
+\vspace{0.4em}
+\textbf{Resumo.}
+Em bateria, o que distingue um estilo do outro está em grande parte no \textit{groove}: o microtiming e a dinâmica com
+que cada nota é tocada, que se perdem quando a música é quantizada numa grade rítmica. Este trabalho aborda a geração
+simbólica de bateria expressiva condicionada por estilo musical (rock, funk, latin, jazz, hip-hop e soul) a partir do
+\textit{Groove MIDI Dataset}, cujas performances em 4/4 somam 491 gravações, 12,7 h e cerca de 21 mil compassos,
+com forte desbalanceamento entre estilos. As performances são representadas com a tokenização PerTok, que combina uma
+grade de semicolcheia com um \textit{token} de desvio temporal por nota e 16 níveis de \textit{velocity}, preservando
+o \textit{swing} com erro de \textit{onset} de cerca de 2 ms. O modelo principal é um Transformer
+\textit{decoder-only} implementado em PyTorch, no qual o estilo entra como um \textit{embedding} somado a cada posição
+e é substituído por um estilo nulo em 20\% das sequências de treino, o que permite aplicar \textit{classifier-free
+guidance} na geração para regular a intensidade do estilo e trocá-lo no meio da música; a amostragem combina
+temperatura, \textit{top-k} e \textit{top-p}, e a amostragem ponderada por estilo mitiga o desbalanceamento dos dados.
+Como \textit{baseline}, treinamos uma cadeia de Markov de ordem $n$ por estilo, com \textit{backoff}, sobre os mesmos
+\textit{tokens}, com a ordem escolhida pela verossimilhança na validação. Os dois sistemas geram 100 amostras de
+8 compassos por estilo, comparadas com janelas humanas do mesmo estilo por métricas de \textit{groove} --
+taxa de tempos vazios, consistência de \textit{groove}, consistência de padrão, densidade, \textit{swing} e desvio de
+microtiming -- confrontando distribuições, e não apenas médias, por área de sobreposição e divergência KL. A eficácia
+do condicionamento é verificada por uma matriz que mede a distância entre cada estilo gerado e cada estilo real, sem
+recorrer a um classificador, e o papel do microtiming é examinado comparando cada amostra com sua versão quantizada.
+O trabalho resulta em um \textit{pipeline} reprodutível de ponta a ponta (tokenização, treino, geração, renderização em
+áudio e avaliação) e discute os limites do modelo na estrutura de longo prazo e nos estilos com poucos dados.
+
+\end{document}
