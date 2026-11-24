@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bateria condicionada por estilo</title>
+<style>
+:root { color-scheme: light dark; --surface: #fcfcfb; --card: #ffffff; --ink: #0b0b0b;
+  --ink-secondary: #52514e; --line: #e1e0d9; --accent: #2a78d6; }
+@media (prefers-color-scheme: dark) {
+  :root { --surface: #161615; --card: #1f1f1d; --ink: #f2f1ed; --ink-secondary: #b5b3ad;
+    --line: #34332f; --accent: #6da7ec; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface); color: var(--ink);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 1240px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 1.8rem; margin: 0 0 8px; }
+h2 { font-size: 1.35rem; margin: 48px 0 4px; padding-top: 16px; border-top: 1px solid var(--line); }
+h3 { font-size: 1.05rem; margin: 24px 0 8px; }
+p { max-width: 72ch; color: var(--ink-secondary); }
+nav ol { margin: 8px 0 0; padding-left: 24px; }
+nav li { margin: 2px 0; }
+a { color: var(--accent); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+figure { margin: 0; padding: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+figcaption { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+figcaption span { color: var(--ink-secondary); font-size: 0.9rem; }
+audio { width: 100%; }
+figure img { display: block; width: 100%; height: auto; margin-top: 8px; border-radius: 4px; }
+.missing { display: flex; align-items: center; justify-content: center; min-height: 120px;
+  color: var(--ink-secondary); font-style: italic; }
+</style>
+</head>
+<body>
+<main>
+<h1>Bateria condicionada por estilo</h1>
+<p>Amostras de 8 compassos do Transformer condicionado por estilo (CFG 1,
+temperatura 0,9, top-p 1 (sem corte)) e da cadeia de Markov por estilo,
+ao lado de janelas humanas da validação do Groove MIDI Dataset. Em cada pasta, a amostra é a
+primeira seed completa na ordem do manifest, sem escolha depois de ouvir. O áudio usa o BPM mediano do estilo no treino e
+o soundfont FluidR3_GM. No piano-roll, a cor mostra a velocity e cada nota fica na posição tocada, fora da grade quando há
+microtiming.</p>
+<nav><ol>
+<li><a href="#estilos">Transformer × Markov × humano</a></li>
+<li><a href="#microtiming">Com e sem microtiming</a></li>
+<li><a href="#troca">Troca de estilo no meio</a></li>
+<li><a href="#intensidade">Intensidade do estilo</a></li>
+</ol></nav>
+<section id="estilos">
+<h2>1. Transformer × Markov × humano</h2>
+<p>Uma amostra de cada sistema por estilo. A humana é a primeira janela, em ordem de nome, da validação; o soul não tem janela de validação.</p>
+<article id="estilo-rock">
+<h3>Rock · 105 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Transformer</strong><span>seed 0 · 105 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/rock/0.wav"></audio><a href="img/transformer_rock_0.png"><img src="img/transformer_rock_0.png" alt="Piano-roll de transformer/rock/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Markov</strong><span>seed 0 · 105 BPM</span></figcaption><audio controls preload="metadata" src="../samples/markov/rock/0.wav"></audio><a href="img/markov_rock_0.png"><img src="img/markov_rock_0.png" alt="Piano-roll de markov/rock/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Humano</strong><span>janela drummer1-session3-13_0 · 105 BPM</span></figcaption><audio controls preload="metadata" src="../samples/humano/rock/drummer1-session3-13_0.wav"></audio><a href="img/humano_rock_drummer1-session3-13_0.png"><img src="img/humano_rock_drummer1-session3-13_0.png" alt="Piano-roll de humano/rock/drummer1-session3-13_0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="estilo-funk">
+<h3>Funk · 100 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Transformer</strong><span>seed 0 · 100 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/funk/0.wav"></audio><a href="img/transformer_funk_0.png"><img src="img/transformer_funk_0.png" alt="Piano-roll de transformer/funk/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Markov</strong><span>seed 0 · 100 BPM</span></figcaption><audio controls preload="metadata" src="../samples/markov/funk/0.wav"></audio><a href="img/markov_funk_0.png"><img src="img/markov_funk_0.png" alt="Piano-roll de markov/funk/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Humano</strong><span>janela drummer1-session1-126_0 · 100 BPM</span></figcaption><audio controls preload="metadata" src="../samples/humano/funk/drummer1-session1-126_0.wav"></audio><a href="img/humano_funk_drummer1-session1-126_0.png"><img src="img/humano_funk_drummer1-session1-126_0.png" alt="Piano-roll de humano/funk/drummer1-session1-126_0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="estilo-latin">
+<h3>Latin · 108 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Transformer</strong><span>seed 0 · 108 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/latin/0.wav"></audio><a href="img/transformer_latin_0.png"><img src="img/transformer_latin_0.png" alt="Piano-roll de transformer/latin/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Markov</strong><span>seed 0 · 108 BPM</span></figcaption><audio controls preload="metadata" src="../samples/markov/latin/0.wav"></audio><a href="img/markov_latin_0.png"><img src="img/markov_latin_0.png" alt="Piano-roll de markov/latin/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Humano</strong><span>janela drummer1-session1-145_0 · 108 BPM</span></figcaption><audio controls preload="metadata" src="../samples/humano/latin/drummer1-session1-145_0.wav"></audio><a href="img/humano_latin_drummer1-session1-145_0.png"><img src="img/humano_latin_drummer1-session1-145_0.png" alt="Piano-roll de humano/latin/drummer1-session1-145_0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="estilo-jazz">
+<h3>Jazz · 124 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Transformer</strong><span>seed 0 · 124 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/jazz/0.wav"></audio><a href="img/transformer_jazz_0.png"><img src="img/transformer_jazz_0.png" alt="Piano-roll de transformer/jazz/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Markov</strong><span>seed 1 · 124 BPM</span></figcaption><audio controls preload="metadata" src="../samples/markov/jazz/1.wav"></audio><a href="img/markov_jazz_1.png"><img src="img/markov_jazz_1.png" alt="Piano-roll de markov/jazz/1" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Humano</strong><span>janela drummer3-session1-15_0 · 124 BPM</span></figcaption><audio controls preload="metadata" src="../samples/humano/jazz/drummer3-session1-15_0.wav"></audio><a href="img/humano_jazz_drummer3-session1-15_0.png"><img src="img/humano_jazz_drummer3-session1-15_0.png" alt="Piano-roll de humano/jazz/drummer3-session1-15_0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="estilo-hiphop">
+<h3>Hip-hop · 92 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Transformer</strong><span>seed 0 · 92 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/hiphop/0.wav"></audio><a href="img/transformer_hiphop_0.png"><img src="img/transformer_hiphop_0.png" alt="Piano-roll de transformer/hiphop/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Markov</strong><span>seed 1 · 92 BPM</span></figcaption><audio controls preload="metadata" src="../samples/markov/hiphop/1.wav"></audio><a href="img/markov_hiphop_1.png"><img src="img/markov_hiphop_1.png" alt="Piano-roll de markov/hiphop/1" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Humano</strong><span>janela drummer3-session2-25_0 · 92 BPM</span></figcaption><audio controls preload="metadata" src="../samples/humano/hiphop/drummer3-session2-25_0.wav"></audio><a href="img/humano_hiphop_drummer3-session2-25_0.png"><img src="img/humano_hiphop_drummer3-session2-25_0.png" alt="Piano-roll de humano/hiphop/drummer3-session2-25_0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="estilo-soul">
+<h3>Soul · 104,5 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Transformer</strong><span>seed 0 · 104,5 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/soul/0.wav"></audio><a href="img/transformer_soul_0.png"><img src="img/transformer_soul_0.png" alt="Piano-roll de transformer/soul/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Markov</strong><span>seed 0 · 104,5 BPM</span></figcaption><audio controls preload="metadata" src="../samples/markov/soul/0.wav"></audio><a href="img/markov_soul_0.png"><img src="img/markov_soul_0.png" alt="Piano-roll de markov/soul/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Humano</strong></figcaption><div class="missing">sem janela de validação</div></figure></div>
+</article>
+</section>
+<section id="microtiming">
+<h2>2. Com e sem microtiming</h2>
+<p>A mesma amostra do Transformer, com os desvios de microtiming e com todos eles zerados (cada nota na semicolcheia). Peças e velocities são as mesmas.</p>
+<article id="microtiming-rock">
+<h3>Rock · 105 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Com microtiming</strong><span>seed 0 · 105 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/rock/0.wav"></audio><a href="img/transformer_rock_0.png"><img src="img/transformer_rock_0.png" alt="Piano-roll de transformer/rock/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Quantizada</strong><span>seed 0 · 105 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/rock_quantizado/0.wav"></audio><a href="img/transformer_rock_quantizado_0.png"><img src="img/transformer_rock_quantizado_0.png" alt="Piano-roll de transformer/rock_quantizado/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="microtiming-funk">
+<h3>Funk · 100 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Com microtiming</strong><span>seed 0 · 100 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/funk/0.wav"></audio><a href="img/transformer_funk_0.png"><img src="img/transformer_funk_0.png" alt="Piano-roll de transformer/funk/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Quantizada</strong><span>seed 0 · 100 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/funk_quantizado/0.wav"></audio><a href="img/transformer_funk_quantizado_0.png"><img src="img/transformer_funk_quantizado_0.png" alt="Piano-roll de transformer/funk_quantizado/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="microtiming-latin">
+<h3>Latin · 108 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Com microtiming</strong><span>seed 0 · 108 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/latin/0.wav"></audio><a href="img/transformer_latin_0.png"><img src="img/transformer_latin_0.png" alt="Piano-roll de transformer/latin/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Quantizada</strong><span>seed 0 · 108 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/latin_quantizado/0.wav"></audio><a href="img/transformer_latin_quantizado_0.png"><img src="img/transformer_latin_quantizado_0.png" alt="Piano-roll de transformer/latin_quantizado/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="microtiming-jazz">
+<h3>Jazz · 124 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Com microtiming</strong><span>seed 0 · 124 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/jazz/0.wav"></audio><a href="img/transformer_jazz_0.png"><img src="img/transformer_jazz_0.png" alt="Piano-roll de transformer/jazz/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Quantizada</strong><span>seed 0 · 124 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/jazz_quantizado/0.wav"></audio><a href="img/transformer_jazz_quantizado_0.png"><img src="img/transformer_jazz_quantizado_0.png" alt="Piano-roll de transformer/jazz_quantizado/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="microtiming-hiphop">
+<h3>Hip-hop · 92 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Com microtiming</strong><span>seed 0 · 92 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/hiphop/0.wav"></audio><a href="img/transformer_hiphop_0.png"><img src="img/transformer_hiphop_0.png" alt="Piano-roll de transformer/hiphop/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Quantizada</strong><span>seed 0 · 92 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/hiphop_quantizado/0.wav"></audio><a href="img/transformer_hiphop_quantizado_0.png"><img src="img/transformer_hiphop_quantizado_0.png" alt="Piano-roll de transformer/hiphop_quantizado/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="microtiming-soul">
+<h3>Soul · 104,5 BPM</h3>
+<div class="grid"><figure><figcaption><strong>Com microtiming</strong><span>seed 0 · 104,5 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/soul/0.wav"></audio><a href="img/transformer_soul_0.png"><img src="img/transformer_soul_0.png" alt="Piano-roll de transformer/soul/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Quantizada</strong><span>seed 0 · 104,5 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/soul_quantizado/0.wav"></audio><a href="img/transformer_soul_quantizado_0.png"><img src="img/transformer_soul_quantizado_0.png" alt="Piano-roll de transformer/soul_quantizado/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+</section>
+<section id="troca">
+<h2>3. Troca de estilo no meio</h2>
+<p>O Transformer recebe um estilo nos compassos 1 a 4 e outro nos compassos 5 a 8. O áudio inteiro fica no BPM do primeiro estilo.</p>
+<div class="grid"><figure><figcaption><strong>Rock → Funk</strong><span>seed 0 · 105 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/troca_rock-funk/0.wav"></audio><a href="img/transformer_troca_rock-funk_0.png"><img src="img/transformer_troca_rock-funk_0.png" alt="Piano-roll de transformer/troca_rock-funk/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>Jazz → Hip-hop</strong><span>seed 0 · 124 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/troca_jazz-hiphop/0.wav"></audio><a href="img/transformer_troca_jazz-hiphop_0.png"><img src="img/transformer_troca_jazz-hiphop_0.png" alt="Piano-roll de transformer/troca_jazz-hiphop/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</section>
+<section id="intensidade">
+<h2>4. Intensidade do estilo</h2>
+<p>A mesma seed com escala de CFG 1; 1,5; 3, na temperatura 0,9 e top-p 1 (sem corte) da varredura na validação. CFG 1 é a geração condicionada sem reforço; escalas maiores empurram a amostra para o estilo.</p>
+<article id="intensidade-rock">
+<h3>Rock · 105 BPM</h3>
+<div class="grid"><figure><figcaption><strong>CFG 1</strong><span>seed 0 · 105 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/rock_cfg1_t0.9_p1/0.wav"></audio><a href="img/transformer_rock_cfg1_t0.9_p1_0.png"><img src="img/transformer_rock_cfg1_t0.9_p1_0.png" alt="Piano-roll de transformer/rock_cfg1_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 1,5</strong><span>seed 0 · 105 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/rock_cfg1.5_t0.9_p1/0.wav"></audio><a href="img/transformer_rock_cfg1.5_t0.9_p1_0.png"><img src="img/transformer_rock_cfg1.5_t0.9_p1_0.png" alt="Piano-roll de transformer/rock_cfg1.5_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 3</strong><span>seed 0 · 105 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/rock_cfg3_t0.9_p1/0.wav"></audio><a href="img/transformer_rock_cfg3_t0.9_p1_0.png"><img src="img/transformer_rock_cfg3_t0.9_p1_0.png" alt="Piano-roll de transformer/rock_cfg3_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="intensidade-funk">
+<h3>Funk · 100 BPM</h3>
+<div class="grid"><figure><figcaption><strong>CFG 1</strong><span>seed 0 · 100 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/funk_cfg1_t0.9_p1/0.wav"></audio><a href="img/transformer_funk_cfg1_t0.9_p1_0.png"><img src="img/transformer_funk_cfg1_t0.9_p1_0.png" alt="Piano-roll de transformer/funk_cfg1_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 1,5</strong><span>seed 0 · 100 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/funk_cfg1.5_t0.9_p1/0.wav"></audio><a href="img/transformer_funk_cfg1.5_t0.9_p1_0.png"><img src="img/transformer_funk_cfg1.5_t0.9_p1_0.png" alt="Piano-roll de transformer/funk_cfg1.5_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 3</strong><span>seed 0 · 100 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/funk_cfg3_t0.9_p1/0.wav"></audio><a href="img/transformer_funk_cfg3_t0.9_p1_0.png"><img src="img/transformer_funk_cfg3_t0.9_p1_0.png" alt="Piano-roll de transformer/funk_cfg3_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="intensidade-latin">
+<h3>Latin · 108 BPM</h3>
+<div class="grid"><figure><figcaption><strong>CFG 1</strong><span>seed 0 · 108 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/latin_cfg1_t0.9_p1/0.wav"></audio><a href="img/transformer_latin_cfg1_t0.9_p1_0.png"><img src="img/transformer_latin_cfg1_t0.9_p1_0.png" alt="Piano-roll de transformer/latin_cfg1_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 1,5</strong><span>seed 0 · 108 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/latin_cfg1.5_t0.9_p1/0.wav"></audio><a href="img/transformer_latin_cfg1.5_t0.9_p1_0.png"><img src="img/transformer_latin_cfg1.5_t0.9_p1_0.png" alt="Piano-roll de transformer/latin_cfg1.5_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 3</strong><span>seed 0 · 108 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/latin_cfg3_t0.9_p1/0.wav"></audio><a href="img/transformer_latin_cfg3_t0.9_p1_0.png"><img src="img/transformer_latin_cfg3_t0.9_p1_0.png" alt="Piano-roll de transformer/latin_cfg3_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="intensidade-jazz">
+<h3>Jazz · 124 BPM</h3>
+<div class="grid"><figure><figcaption><strong>CFG 1</strong><span>seed 0 · 124 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/jazz_cfg1_t0.9_p1/0.wav"></audio><a href="img/transformer_jazz_cfg1_t0.9_p1_0.png"><img src="img/transformer_jazz_cfg1_t0.9_p1_0.png" alt="Piano-roll de transformer/jazz_cfg1_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 1,5</strong><span>seed 0 · 124 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/jazz_cfg1.5_t0.9_p1/0.wav"></audio><a href="img/transformer_jazz_cfg1.5_t0.9_p1_0.png"><img src="img/transformer_jazz_cfg1.5_t0.9_p1_0.png" alt="Piano-roll de transformer/jazz_cfg1.5_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 3</strong><span>seed 0 · 124 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/jazz_cfg3_t0.9_p1/0.wav"></audio><a href="img/transformer_jazz_cfg3_t0.9_p1_0.png"><img src="img/transformer_jazz_cfg3_t0.9_p1_0.png" alt="Piano-roll de transformer/jazz_cfg3_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="intensidade-hiphop">
+<h3>Hip-hop · 92 BPM</h3>
+<div class="grid"><figure><figcaption><strong>CFG 1</strong><span>seed 0 · 92 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/hiphop_cfg1_t0.9_p1/0.wav"></audio><a href="img/transformer_hiphop_cfg1_t0.9_p1_0.png"><img src="img/transformer_hiphop_cfg1_t0.9_p1_0.png" alt="Piano-roll de transformer/hiphop_cfg1_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 1,5</strong><span>seed 0 · 92 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/hiphop_cfg1.5_t0.9_p1/0.wav"></audio><a href="img/transformer_hiphop_cfg1.5_t0.9_p1_0.png"><img src="img/transformer_hiphop_cfg1.5_t0.9_p1_0.png" alt="Piano-roll de transformer/hiphop_cfg1.5_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 3</strong><span>seed 0 · 92 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/hiphop_cfg3_t0.9_p1/0.wav"></audio><a href="img/transformer_hiphop_cfg3_t0.9_p1_0.png"><img src="img/transformer_hiphop_cfg3_t0.9_p1_0.png" alt="Piano-roll de transformer/hiphop_cfg3_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+<article id="intensidade-soul">
+<h3>Soul · 104,5 BPM</h3>
+<div class="grid"><figure><figcaption><strong>CFG 1</strong><span>seed 0 · 104,5 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/soul_cfg1_t0.9_p1/0.wav"></audio><a href="img/transformer_soul_cfg1_t0.9_p1_0.png"><img src="img/transformer_soul_cfg1_t0.9_p1_0.png" alt="Piano-roll de transformer/soul_cfg1_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 1,5</strong><span>seed 0 · 104,5 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/soul_cfg1.5_t0.9_p1/0.wav"></audio><a href="img/transformer_soul_cfg1.5_t0.9_p1_0.png"><img src="img/transformer_soul_cfg1.5_t0.9_p1_0.png" alt="Piano-roll de transformer/soul_cfg1.5_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure><figure><figcaption><strong>CFG 3</strong><span>seed 0 · 104,5 BPM</span></figcaption><audio controls preload="metadata" src="../samples/transformer/soul_cfg3_t0.9_p1/0.wav"></audio><a href="img/transformer_soul_cfg3_t0.9_p1_0.png"><img src="img/transformer_soul_cfg3_t0.9_p1_0.png" alt="Piano-roll de transformer/soul_cfg3_t0.9_p1/0" width="1980" height="638" loading="lazy"></a></figure></div>
+</article>
+</section>
+</main>
+</body>
+</html>
