@@ -1,0 +1,9 @@
+name: demo
+demo:
+  final_run: runs/20261123-2240_final
+  sweep_run: runs/20261123-2204_sweep
+  cfg_scales: [1.0, 1.5, 3.0]
+  style_switches:
+    - {before: rock, after: funk}
+    - {before: jazz, after: hiphop}
+  output_dir: .
