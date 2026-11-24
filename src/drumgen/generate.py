@@ -17,6 +17,7 @@ from drumgen.config import (
     GenerationSettings,
     PieceType,
     SampleFolder,
+    SamplingPoint,
     Style,
     StyleSwitch,
     System,
@@ -127,35 +128,44 @@ class GenerationJob:
     folder: SampleFolder
     plan: tuple[BarPlan, ...]
     cfg_scale: float | None
+    temperature: float
+    top_p: float | None
 
     @classmethod
-    def original(cls, style: Style, bars: int, cfg_scale: float | None) -> GenerationJob:
-        return cls(SampleFolder.original(style), (BarPlan(style, PieceType.GROOVE),) * bars, cfg_scale)
+    def original(cls, style: Style, bars: int, cfg_scale: float | None, settings: GenerationSettings) -> GenerationJob:
+        return cls(SampleFolder.original(style), cls._grooves(style, bars), cfg_scale, settings.temperature, settings.top_p)
 
     @classmethod
-    def guided(cls, style: Style, bars: int, cfg_scale: float) -> GenerationJob:
-        return cls(SampleFolder.guided(style, cfg_scale), (BarPlan(style, PieceType.GROOVE),) * bars, cfg_scale)
+    def guided(cls, style: Style, bars: int, point: SamplingPoint) -> GenerationJob:
+        folder = SampleFolder.guided(style, point)
+        return cls(folder, cls._grooves(style, bars), point.cfg_scale, point.temperature, point.top_p)
 
     @classmethod
-    def switch(cls, style_switch: StyleSwitch, bars: int, cfg_scale: float | None) -> GenerationJob:
+    def switch(
+        cls, style_switch: StyleSwitch, bars: int, cfg_scale: float | None, settings: GenerationSettings
+    ) -> GenerationJob:
         half = bars // 2
         before = (BarPlan(style_switch.before, PieceType.GROOVE),) * half
         after = (BarPlan(style_switch.after, PieceType.GROOVE),) * (bars - half)
-        return cls(SampleFolder.switch(style_switch), before + after, cfg_scale)
+        return cls(SampleFolder.switch(style_switch), before + after, cfg_scale, settings.temperature, settings.top_p)
 
     @classmethod
-    def fill(cls, style: Style, bars: int, cfg_scale: float | None) -> GenerationJob:
-        plan = (BarPlan(style, PieceType.GROOVE),) * (bars - 1) + (BarPlan(style, PieceType.FILL),)
-        return cls(SampleFolder.fill(style), plan, cfg_scale)
+    def fill(cls, style: Style, bars: int, cfg_scale: float | None, settings: GenerationSettings) -> GenerationJob:
+        plan = cls._grooves(style, bars - 1) + (BarPlan(style, PieceType.FILL),)
+        return cls(SampleFolder.fill(style), plan, cfg_scale, settings.temperature, settings.top_p)
+
+    @staticmethod
+    def _grooves(style: Style, bars: int) -> tuple[BarPlan, ...]:
+        return (BarPlan(style, PieceType.GROOVE),) * bars
 
     def request(self, seed: int, settings: GenerationSettings) -> GenerationRequest:
         return GenerationRequest(
             plan=self.plan,
             seed=seed,
             cfg_scale=self.cfg_scale,
-            temperature=settings.temperature,
+            temperature=self.temperature,
             top_k=settings.top_k,
-            top_p=settings.top_p,
+            top_p=self.top_p,
         )
 
 
@@ -238,15 +248,17 @@ class BatchGenerator:
         guided = VariantKind.GUIDED in capabilities
         if guided and settings.cfg_scale_sweep:
             sweep = [
-                GenerationJob.guided(style, bars, scale) for style in Style.evaluated() for scale in settings.cfg_scale_sweep
+                GenerationJob.guided(style, bars, point) for style in Style.evaluated() for point in settings.sweep_points
             ]
             return sweep, []
         cfg_scale = settings.cfg_scale if guided else None
         candidates: dict[VariantKind, list[GenerationJob]] = {
-            VariantKind.STYLE_SWITCH: [GenerationJob.switch(switch, bars, cfg_scale) for switch in settings.style_switches],
-            VariantKind.FILL: [GenerationJob.fill(style, bars, cfg_scale) for style in settings.fill_styles],
+            VariantKind.STYLE_SWITCH: [
+                GenerationJob.switch(switch, bars, cfg_scale, settings) for switch in settings.style_switches
+            ],
+            VariantKind.FILL: [GenerationJob.fill(style, bars, cfg_scale, settings) for style in settings.fill_styles],
         }
-        jobs = [GenerationJob.original(style, bars, cfg_scale) for style in Style.evaluated()]
+        jobs = [GenerationJob.original(style, bars, cfg_scale, settings) for style in Style.evaluated()]
         warnings: list[str] = []
         for kind, kind_jobs in candidates.items():
             if kind in capabilities:

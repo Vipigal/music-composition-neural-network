@@ -1,1 +1,12 @@
 name: transformer
+generation:
+  samples_per_style: 100
+  cfg_scale: 1.0
+  temperature: 0.9
+  top_p: null
+  cfg_scale_sweep: []
+  temperature_sweep: []
+  top_p_sweep: []
+  style_switches:
+    - {before: rock, after: funk}
+    - {before: jazz, after: hiphop}

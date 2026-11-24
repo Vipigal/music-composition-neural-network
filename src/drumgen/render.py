@@ -8,7 +8,6 @@ import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 
 import matplotlib
@@ -27,7 +26,7 @@ from symusic.core import ScoreTick, TempoTick, TextMetaTick, TrackTick
 from tqdm import tqdm
 
 from drumgen.config import ExperimentConfig, RenderSettings, SampleFolder, Style
-from drumgen.tokenizer import DRUM_CLASSES
+from drumgen.tokenizer import DrumPiece
 
 BEATS_PER_BAR = 4
 SIXTEENTHS_PER_BEAT = 4
@@ -38,31 +37,6 @@ END_MARKER = "fim"
 INT16_MIN = -32768
 INT16_MAX = 32767
 DRUM_TRACK_NAME = "Drums"
-
-
-class DrumPiece(Enum):
-    KICK = 36
-    SNARE = 38
-    CLOSED_HIHAT = 42
-    OPEN_HIHAT = 46
-    LOW_TOM = 43
-    MID_TOM = 47
-    HIGH_TOM = 50
-    CRASH = 49
-    RIDE = 51
-
-    @property
-    def label(self) -> str:
-        return DRUM_PIECE_LABELS[self]
-
-    @property
-    def row(self) -> int:
-        return list(DrumPiece).index(self)
-
-    @classmethod
-    def of(cls, pitch: int) -> DrumPiece | None:
-        drum_class = DRUM_CLASSES.get(pitch)
-        return None if drum_class is None else cls(drum_class)
 
 
 DRUM_PIECE_LABELS = {
@@ -76,6 +50,7 @@ DRUM_PIECE_LABELS = {
     DrumPiece.CRASH: "prato de ataque",
     DrumPiece.RIDE: "condução",
 }
+DRUM_PIECE_ROWS = {piece: row for row, piece in enumerate(DrumPiece)}
 
 
 @dataclass(frozen=True)
@@ -291,7 +266,7 @@ class PianoRoll:
             for note in track.notes
             if (piece := DrumPiece.of(note.pitch)) is not None
         ]
-        return sorted(notes, key=lambda note: (note.beat, note.piece.row))
+        return sorted(notes, key=lambda note: (note.beat, DRUM_PIECE_ROWS[note.piece]))
 
     def panels(self, bars: int) -> int:
         return math.ceil(bars / self.BARS_PER_PANEL)
@@ -314,8 +289,8 @@ class PianoRoll:
             in_panel = [note for note in notes if self.panel_of(note.beat, panels) == panel]
             axis.vlines(
                 [note.beat for note in in_panel],
-                [note.piece.row - self.NOTE_HALF_HEIGHT for note in in_panel],
-                [note.piece.row + self.NOTE_HALF_HEIGHT for note in in_panel],
+                [DRUM_PIECE_ROWS[note.piece] - self.NOTE_HALF_HEIGHT for note in in_panel],
+                [DRUM_PIECE_ROWS[note.piece] + self.NOTE_HALF_HEIGHT for note in in_panel],
                 colors=[self.velocity_color(note.velocity) for note in in_panel],
                 linewidth=self.NOTE_WIDTH,
                 capstyle="round",
@@ -353,7 +328,9 @@ class PianoRoll:
                 axis.axvline(beat, color=ChartPalette.GRIDLINE, linewidth=0.6, zorder=1)
         beats = list(range(first_beat, last_beat))
         axis.set_xticks(beats, [f"{beat // BEATS_PER_BAR + 1}.{beat % BEATS_PER_BAR + 1}" for beat in beats])
-        axis.set_yticks([piece.row for piece in DrumPiece], [piece.label for piece in DrumPiece])
+        axis.set_yticks(
+            [DRUM_PIECE_ROWS[piece] for piece in DrumPiece], [DRUM_PIECE_LABELS[piece] for piece in DrumPiece]
+        )
         axis.tick_params(axis="both", length=0, colors=ChartPalette.INK_SECONDARY)
         for spine in axis.spines.values():
             spine.set_visible(False)

@@ -6,7 +6,7 @@ import pytest
 from symusic.core import NoteTick, ScoreTick, TrackTick
 
 from drumgen.config import TokenizerSettings
-from drumgen.tokenizer import DrumTokenizer
+from drumgen.tokenizer import DRUM_CLASSES, DrumPiece, DrumTokenizer
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 FIXTURE_BPMS = {"jazz_120_beat.mid": 120, "funk_117_beat.mid": 117, "rock_115_fill.mid": 115}
@@ -42,6 +42,18 @@ def test_gmd_pitches_collapse_into_the_nine_groovae_classes(tokenizer: DrumToken
     mapped = tokenizer.map_drums(score)
 
     assert [note.pitch for note in mapped.tracks[0].notes] == [38, 42, 38, 51, 43]
+
+
+def test_drum_pieces_are_the_nine_classes() -> None:
+    assert {piece.value for piece in DrumPiece} == set(DRUM_CLASSES.values())
+
+
+@pytest.mark.parametrize(
+    ("pitch", "piece"),
+    [(36, DrumPiece.KICK), (37, DrumPiece.SNARE), (44, DrumPiece.CLOSED_HIHAT), (53, DrumPiece.RIDE), (81, None)],
+)
+def test_drum_piece_of_a_gmd_pitch_follows_the_class_mapping(pitch: int, piece: DrumPiece | None) -> None:
+    assert DrumPiece.of(pitch) == piece
 
 
 def test_pitches_outside_the_gmd_kit_are_dropped(tokenizer: DrumTokenizer) -> None:

@@ -14,12 +14,23 @@ from drumgen.config import (
     ExperimentRun,
     PathSettings,
     PrepareSettings,
+    SampleFolder,
+    SamplingPoint,
     Split,
     Style,
     System,
 )
-from drumgen.evaluate import EvaluateCommand, EvaluationReport, Evaluator, ReferenceSet
-from drumgen.metrics import GrooveMetric, SetMetric
+from drumgen.evaluate import (
+    EvaluateCommand,
+    EvaluationReport,
+    Evaluator,
+    GroupComparison,
+    MeasuredSample,
+    ReferenceSet,
+    SampleGroup,
+    SweepScore,
+)
+from drumgen.metrics import DistributionComparison, DrumSample, GrooveMetric, SampleMetrics, SetMetric
 from drumgen.tokenizer import TICKS_PER_QUARTER
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -134,6 +145,7 @@ def test_writes_every_output_into_the_run(evaluated: EvaluatedTree) -> None:
         assert (output / f"distribution_{metric.value}.png").stat().st_size > 0
     for system, variant in [("humano", "original"), ("humano", "quantizado"), ("markov", "original")]:
         assert (output / f"style_matrix_{system}_{variant}.png").stat().st_size > 0
+    assert not (output / "sweep_ranking.csv").exists()
 
 
 def test_per_sample_has_one_row_per_sample_and_per_reference_window(evaluated: EvaluatedTree) -> None:
@@ -250,8 +262,8 @@ def test_sample_longer_than_the_window_names_the_file(tmp_path: Path) -> None:
 def test_command_reads_config_and_run() -> None:
     command = EvaluateCommand.parse(["--config", str(REPO_ROOT / "configs" / "eval.yaml"), "--run", "runs/x"])
 
-    assert command.config.evaluation.reference_split is Split.VAL
-    assert command.config.evaluation.output_dir is None
+    assert command.config.evaluation.reference_split is Split.TEST
+    assert command.config.evaluation.output_dir == REPO_ROOT / "results"
     assert command.run == Path("runs/x")
     assert System("humano") is System.HUMAN
 
@@ -283,3 +295,227 @@ def test_new_evaluation_removes_the_outputs_of_the_previous_one(tmp_path: Path) 
     assert (output / "style_matrix_humano_original.png").exists()
     assert {row["variant"] for row in read_csv(output / "summary.csv")} == {"original"}
     assert notes.read_text() == "do usuário"
+
+
+SPREAD: list[float | None] = [0.0, 1.0]
+CONSTANT: list[float | None] = [0.5, 0.5]
+UNDEFINED: list[float | None] = [None, None]
+
+
+@pytest.fixture(scope="module")
+def drum_sample(tmp_path_factory: pytest.TempPathFactory) -> DrumSample:
+    [path, *_] = write_windows(tmp_path_factory.mktemp("janela"), Style.ROCK, seed=0)
+    return DrumSample.load(path, BARS)
+
+
+def distribution(overlap_area: float, degenerate: bool = False) -> DistributionComparison:
+    return DistributionComparison(
+        generated_mean=0.0,
+        generated_std=0.0,
+        reference_mean=0.0,
+        reference_std=0.0,
+        mean_distance=0.0,
+        overlap_area=overlap_area,
+        kl_divergence=0.0,
+        generated_count=1,
+        reference_count=1,
+        generated_undefined=0,
+        reference_undefined=0,
+        degenerate=degenerate,
+    )
+
+
+def reference_group(
+    style: Style, sample: DrumSample, overrides: dict[GrooveMetric, list[float | None]] | None = None
+) -> SampleGroup:
+    columns = {metric: SPREAD for metric in GrooveMetric} | (overrides or {})
+    windows = [
+        MeasuredSample(
+            file=f"{style.value}_{index}.mid",
+            sample=sample,
+            metrics=SampleMetrics({metric: values[index] for metric, values in columns.items()}),
+        )
+        for index in range(len(SPREAD))
+    ]
+    return SampleGroup(System.REFERENCE, SampleFolder.original(style), windows)
+
+
+def sweep_comparison(
+    style: Style,
+    point: SamplingPoint,
+    distributions: dict[GrooveMetric, DistributionComparison | None],
+    reference: SampleGroup,
+) -> GroupComparison:
+    return GroupComparison(
+        group=SampleGroup(System.TRANSFORMER, SampleFolder.guided(style, point), []),
+        reference=reference,
+        distributions=distributions,
+        positional={},
+    )
+
+
+def uniform(style: Style, point: SamplingPoint, overlap_area: float, sample: DrumSample) -> GroupComparison:
+    distributions: dict[GrooveMetric, DistributionComparison | None] = {
+        metric: distribution(overlap_area) for metric in GrooveMetric
+    }
+    return sweep_comparison(style, point, distributions, reference_group(style, sample))
+
+
+def test_sweep_ranking_averages_only_the_styles_with_validation(drum_sample: DrumSample) -> None:
+    first = SamplingPoint.of(1.0, 1.0, None)
+    second = SamplingPoint.of(3.0, 0.9, 0.9)
+    comparisons = [
+        uniform(Style.ROCK, first, 0.9, drum_sample),
+        uniform(Style.JAZZ, first, 0.5, drum_sample),
+        uniform(Style.HIPHOP, first, 1.0, drum_sample),
+        uniform(Style.ROCK, second, 0.8, drum_sample),
+        uniform(Style.JAZZ, second, 0.8, drum_sample),
+        uniform(Style.HIPHOP, second, 0.0, drum_sample),
+    ]
+
+    ranking = SweepScore.rank(comparisons)
+
+    assert [score.point for score in ranking] == [second, first]
+    assert ranking[0].mean_overlap == pytest.approx(0.8)
+    assert ranking[1].mean_overlap == pytest.approx(0.7)
+    assert ranking[1].style_overlap == pytest.approx({Style.ROCK: 0.9, Style.JAZZ: 0.5, Style.HIPHOP: 1.0})
+    assert ranking[0].variant == "cfg3_t0.9_p0.9"
+
+
+def test_only_metrics_with_a_degenerate_reference_leave_the_ranking(drum_sample: DrumSample) -> None:
+    point = SamplingPoint.of(1.5, 1.0, 0.9)
+    constant, undefined_reference, undefined_generated, constant_generated, *others = list(GrooveMetric)
+    reference = reference_group(Style.ROCK, drum_sample, {constant: CONSTANT, undefined_reference: UNDEFINED})
+    rock: dict[GrooveMetric, DistributionComparison | None] = {metric: distribution(0.6) for metric in others}
+    rock[constant] = distribution(1.0, degenerate=True)
+    rock[undefined_reference] = None
+    rock[undefined_generated] = None
+    rock[constant_generated] = distribution(0.3, degenerate=True)
+
+    [score] = SweepScore.rank(
+        [sweep_comparison(Style.ROCK, point, rock, reference), uniform(Style.FUNK, point, 0.4, drum_sample)]
+    )
+
+    rock_overlap = (0.6 * len(others) + 0.3 + 0.0) / (len(others) + 2)
+    assert score.style_overlap == pytest.approx({Style.ROCK: rock_overlap, Style.FUNK: 0.4})
+    assert score.mean_overlap == pytest.approx((rock_overlap + 0.4) / 2)
+    assert score.excluded == [(Style.ROCK, constant), (Style.ROCK, undefined_reference)]
+
+
+def test_points_with_and_without_constant_samples_are_ranked_on_the_same_metrics(drum_sample: DrumSample) -> None:
+    varied = SamplingPoint.of(1.0, 1.0, None)
+    constant = SamplingPoint.of(3.0, 0.9, 0.9)
+    flat_reference, *measured = list(GrooveMetric)
+    reference = reference_group(Style.JAZZ, drum_sample, {flat_reference: CONSTANT})
+    constant_samples: dict[GrooveMetric, DistributionComparison | None] = {
+        metric: distribution(0.2, degenerate=True) for metric in GrooveMetric
+    }
+    varied_samples: dict[GrooveMetric, DistributionComparison | None] = {
+        metric: distribution(0.7) for metric in GrooveMetric
+    }
+
+    ranking = SweepScore.rank(
+        [
+            sweep_comparison(Style.JAZZ, constant, constant_samples, reference),
+            sweep_comparison(Style.JAZZ, varied, varied_samples, reference),
+        ]
+    )
+
+    assert [score.point for score in ranking] == [varied, constant]
+    assert [score.excluded for score in ranking] == [[(Style.JAZZ, flat_reference)]] * 2
+    assert [score.mean_overlap for score in ranking] == pytest.approx([0.7, 0.2])
+    assert len(measured) == len(GrooveMetric) - 1
+
+
+def test_single_reference_window_leaves_every_metric_of_the_style_out(drum_sample: DrumSample) -> None:
+    point = SamplingPoint.of(1.0, 1.0, None)
+    single = reference_group(Style.HIPHOP, drum_sample)
+    single = dataclasses.replace(single, samples=single.samples[:1])
+    distributions: dict[GrooveMetric, DistributionComparison | None] = {
+        metric: distribution(0.9, degenerate=True) for metric in GrooveMetric
+    }
+
+    [score] = SweepScore.rank([sweep_comparison(Style.HIPHOP, point, distributions, single)])
+
+    assert score.style_overlap == {}
+    assert score.excluded == [(Style.HIPHOP, metric) for metric in GrooveMetric]
+
+
+def test_sweep_ranking_ignores_folders_outside_the_sweep(drum_sample: DrumSample) -> None:
+    original = GroupComparison(
+        group=SampleGroup(System.TRANSFORMER, SampleFolder.original(Style.ROCK), []),
+        reference=reference_group(Style.ROCK, drum_sample),
+        distributions={metric: distribution(1.0) for metric in GrooveMetric},
+        positional={},
+    )
+
+    assert SweepScore.rank([original]) == []
+
+
+def test_point_without_selection_styles_goes_last_without_a_mean(drum_sample: DrumSample) -> None:
+    lonely = SamplingPoint.of(1.0, 0.9, None)
+    covered = SamplingPoint.of(1.5, 0.9, None)
+
+    ranking = SweepScore.rank(
+        [uniform(Style.SOUL, lonely, 1.0, drum_sample), uniform(Style.LATIN, covered, 0.1, drum_sample)]
+    )
+
+    assert [score.point for score in ranking] == [covered, lonely]
+    assert ranking[1].mean_overlap is None
+
+
+def sweep_run(root: Path) -> tuple[ExperimentConfig, Path]:
+    config = config_for(root)
+    for offset, style in enumerate(SWING):
+        write_windows(config.paths.reference_dir(Split.VAL, style), style, seed=offset)
+    run = ExperimentRun.create(config).path
+    samples = run / "samples" / "transformer"
+    reference = config.paths.reference_dir
+    for style in (Style.ROCK, Style.JAZZ):
+        copy_folder(reference(Split.VAL, style), samples / f"{style.value}_cfg1_t1_p1")
+    copy_folder(reference(Split.VAL, Style.JAZZ), samples / "rock_cfg3_t0.9_p0.9")
+    copy_folder(reference(Split.VAL, Style.JAZZ), samples / "jazz_cfg3_t0.9_p0.9")
+    return config, run
+
+
+def test_sweep_run_writes_the_ranking_from_best_to_worst(tmp_path: Path) -> None:
+    config, run = sweep_run(tmp_path)
+
+    output = Evaluator(config).run(run).output_dir
+
+    rows = read_csv(output / "sweep_ranking.csv")
+    assert list(rows[0]) == [
+        "system",
+        "variant",
+        "reference_split",
+        "cfg_scale",
+        "temperature",
+        "top_p",
+        "mean_overlap_area",
+        *(f"overlap_area_{style.value}" for style in Style.evaluated()),
+        "excluded_metrics",
+    ]
+    assert [(row["variant"], row["cfg_scale"], row["temperature"], row["top_p"]) for row in rows] == [
+        ("cfg1_t1_p1", "1.0", "1.0", ""),
+        ("cfg3_t0.9_p0.9", "3.0", "0.9", "0.9"),
+    ]
+    best, worst = rows
+    assert float(best["mean_overlap_area"]) == pytest.approx(1.0, abs=1e-6)
+    assert float(worst["overlap_area_rock"]) < float(worst["overlap_area_jazz"]) == pytest.approx(1.0, abs=1e-6)
+    assert float(worst["mean_overlap_area"]) < float(best["mean_overlap_area"])
+    assert best["overlap_area_funk"] == "" and best["overlap_area_soul"] == ""
+    assert {row["system"] for row in rows} == {"transformer"}
+    assert {row["reference_split"] for row in rows} == {"val"}
+
+
+def test_ranking_of_a_previous_sweep_is_removed_when_the_run_has_no_sweep(tmp_path: Path) -> None:
+    config, run = sweep_run(tmp_path)
+    output = Evaluator(config).run(run).output_dir
+    samples = run / "samples" / "transformer"
+    for folder in list(samples.iterdir()):
+        shutil.rmtree(folder)
+    copy_folder(config.paths.reference_dir(Split.VAL, Style.ROCK), samples / "rock")
+
+    Evaluator(config).run(run)
+
+    assert not (output / "sweep_ranking.csv").exists()

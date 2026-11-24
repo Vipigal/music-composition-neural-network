@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ from drumgen.config import (
     ExperimentRun,
     PathSettings,
     SampleFolder,
+    SamplingPoint,
     Split,
     Style,
     System,
@@ -45,6 +47,7 @@ from drumgen.render import ChartPalette
 EVAL_DIR = "eval"
 MIDI_PATTERN = "*.mid"
 LIST_SEPARATOR = ";"
+MISSING_OVERLAP = 0.0
 
 PER_SAMPLE_COLUMNS = ["system", "variant", "style", "file", *(metric.value for metric in GrooveMetric)]
 SUMMARY_COLUMNS = [
@@ -78,6 +81,17 @@ STYLE_MATRIX_COLUMNS = [
     "diagonal_wins",
     "diagonal_rows",
     "metrics",
+    "excluded_metrics",
+]
+SWEEP_RANKING_COLUMNS = [
+    "system",
+    "variant",
+    "reference_split",
+    "cfg_scale",
+    "temperature",
+    "top_p",
+    "mean_overlap_area",
+    *(f"overlap_area_{style.value}" for style in Style.evaluated()),
     "excluded_metrics",
 ]
 
@@ -213,6 +227,59 @@ class GroupComparison:
 
 
 @dataclass(frozen=True)
+class SweepScore:
+    system: System
+    variant: str
+    point: SamplingPoint
+    style_overlap: dict[Style, float]
+    excluded: list[tuple[Style, GrooveMetric]]
+
+    @property
+    def mean_overlap(self) -> float | None:
+        selected = [self.style_overlap[style] for style in Style.selection() if style in self.style_overlap]
+        return float(np.mean(selected)) if selected else None
+
+    @classmethod
+    def rank(cls, comparisons: Sequence[GroupComparison]) -> list[SweepScore]:
+        by_point: dict[tuple[System, SamplingPoint], list[GroupComparison]] = {}
+        for comparison in comparisons:
+            point = comparison.group.folder.point
+            if point is not None:
+                by_point.setdefault((comparison.group.system, point), []).append(comparison)
+        scores = [cls._score(system, point, grouped) for (system, point), grouped in by_point.items()]
+        return sorted(
+            scores, key=lambda score: -math.inf if score.mean_overlap is None else score.mean_overlap, reverse=True
+        )
+
+    @classmethod
+    def _score(cls, system: System, point: SamplingPoint, comparisons: Sequence[GroupComparison]) -> SweepScore:
+        style_overlap: dict[Style, float] = {}
+        excluded: list[tuple[Style, GrooveMetric]] = []
+        for comparison in sorted(comparisons, key=lambda comparison: comparison.group.style.index):
+            style = comparison.group.style
+            kept: list[float] = []
+            for metric, distribution in comparison.distributions.items():
+                if cls._reference_is_constant(comparison.reference, metric):
+                    excluded.append((style, metric))
+                else:
+                    kept.append(MISSING_OVERLAP if distribution is None else distribution.overlap_area)
+            if kept:
+                style_overlap[style] = float(np.mean(kept))
+        return cls(
+            system=system,
+            variant=comparisons[0].group.variant,
+            point=point,
+            style_overlap=style_overlap,
+            excluded=excluded,
+        )
+
+    @staticmethod
+    def _reference_is_constant(reference: SampleGroup, metric: GrooveMetric) -> bool:
+        defined = np.array([value for value in reference.values(metric) if value is not None], dtype=np.float64)
+        return KernelDensity.scott_bandwidth(defined) == 0
+
+
+@dataclass(frozen=True)
 class StyleMatrixResult:
     system: System
     variant: str
@@ -237,13 +304,14 @@ class EvaluationTables:
     PER_SAMPLE_FILE = "per_sample.csv"
     SUMMARY_FILE = "summary.csv"
     STYLE_MATRIX_FILE = "style_matrix.csv"
+    SWEEP_RANKING_FILE = "sweep_ranking.csv"
 
     def __init__(self, output_dir: Path, split: Split) -> None:
         self._output_dir = output_dir
         self._split = split
 
     def clear(self) -> None:
-        for name in (self.PER_SAMPLE_FILE, self.SUMMARY_FILE, self.STYLE_MATRIX_FILE):
+        for name in (self.PER_SAMPLE_FILE, self.SUMMARY_FILE, self.STYLE_MATRIX_FILE, self.SWEEP_RANKING_FILE):
             (self._output_dir / name).unlink(missing_ok=True)
 
     def write_per_sample(self, groups: Sequence[SampleGroup]) -> None:
@@ -342,6 +410,31 @@ class EvaluationTables:
                                 CsvFormat.names(matrix.excluded_metrics),
                             ]
                         )
+
+    def write_sweep_ranking(self, ranking: Sequence[SweepScore]) -> None:
+        with (self._output_dir / self.SWEEP_RANKING_FILE).open("w", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=SWEEP_RANKING_COLUMNS)
+            writer.writeheader()
+            for score in ranking:
+                point = score.point
+                writer.writerow(
+                    {
+                        "system": score.system.value,
+                        "variant": score.variant,
+                        "reference_split": self._split.value,
+                        "cfg_scale": point.cfg_scale,
+                        "temperature": point.temperature,
+                        "top_p": "" if point.top_p is None else point.top_p,
+                        "mean_overlap_area": CsvFormat.number(score.mean_overlap),
+                        **{
+                            f"overlap_area_{style.value}": CsvFormat.number(score.style_overlap.get(style))
+                            for style in Style.evaluated()
+                        },
+                        "excluded_metrics": LIST_SEPARATOR.join(
+                            f"{style.value}:{metric.value}" for style, metric in score.excluded
+                        ),
+                    }
+                )
 
 
 class EvaluationFigures:
@@ -554,6 +647,7 @@ class Evaluator:
                 continue
             comparisons.append(GroupComparison.of(group, reference.groups[group.style], resolution))
         matrices = self._style_matrices(tree, reference, warnings)
+        ranking = SweepScore.rank(comparisons)
 
         output = self.output_dir(run)
         output.mkdir(parents=True, exist_ok=True)
@@ -564,6 +658,8 @@ class Evaluator:
         tables.write_per_sample([*tree.groups, *reference.groups.values()])
         tables.write_summary(comparisons)
         tables.write_style_matrices(matrices)
+        if ranking:
+            tables.write_sweep_ranking(ranking)
         if comparisons:
             for metric in GrooveMetric:
                 figures.draw_distributions(comparisons, metric)

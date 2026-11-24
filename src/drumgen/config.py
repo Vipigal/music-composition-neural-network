@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import itertools
 import re
 import subprocess
 import types
@@ -36,6 +37,10 @@ class Style(Enum):
     @classmethod
     def evaluated(cls) -> list[Style]:
         return [style for style in cls if style not in (cls.OTHER, cls.NULL)]
+
+    @classmethod
+    def selection(cls) -> list[Style]:
+        return [cls.ROCK, cls.FUNK, cls.LATIN, cls.JAZZ]
 
     @staticmethod
     def genre_of(gmd_style: str) -> str:
@@ -104,20 +109,40 @@ class VariantKind(Enum):
 
 
 STYLE_NAME = "|".join(style.value for style in Style.evaluated())
+NUMBER = r"\d+(?:\.\d+)?"
+FULL_TOP_P = 1.0
 FOLDER_PATTERNS = {
     VariantKind.STYLE_SWITCH: re.compile(rf"troca_(?P<style>{STYLE_NAME})-(?P<after>{STYLE_NAME})"),
     VariantKind.FILL: re.compile(rf"virada_(?P<style>{STYLE_NAME})"),
-    VariantKind.GUIDED: re.compile(rf"(?P<style>{STYLE_NAME})_cfg(?P<scale>\d+(?:\.\d+)?)"),
+    VariantKind.GUIDED: re.compile(
+        rf"(?P<style>{STYLE_NAME})_cfg(?P<scale>{NUMBER})_t(?P<temperature>{NUMBER})_p(?P<top_p>{NUMBER})"
+    ),
     VariantKind.QUANTIZED: re.compile(rf"(?P<style>{STYLE_NAME})_quantizado"),
     VariantKind.ORIGINAL: re.compile(rf"(?P<style>{STYLE_NAME})"),
 }
 
 
 @dataclass(frozen=True)
+class SamplingPoint:
+    cfg_scale: float
+    temperature: float
+    top_p: float | None
+
+    @classmethod
+    def of(cls, cfg_scale: float, temperature: float, top_p: float | None) -> SamplingPoint:
+        return cls(cfg_scale=cfg_scale, temperature=temperature, top_p=None if top_p == FULL_TOP_P else top_p)
+
+    @property
+    def label(self) -> str:
+        top_p = FULL_TOP_P if self.top_p is None else self.top_p
+        return f"{self.cfg_scale:g}_t{self.temperature:g}_p{top_p:g}"
+
+
+@dataclass(frozen=True)
 class SampleFolder:
     kind: VariantKind
     style: Style
-    cfg_scale: float | None = None
+    point: SamplingPoint | None = None
     next_style: Style | None = None
 
     @classmethod
@@ -129,8 +154,8 @@ class SampleFolder:
         return cls(kind=VariantKind.QUANTIZED, style=style)
 
     @classmethod
-    def guided(cls, style: Style, cfg_scale: float) -> SampleFolder:
-        return cls(kind=VariantKind.GUIDED, style=style, cfg_scale=cfg_scale)
+    def guided(cls, style: Style, point: SamplingPoint) -> SampleFolder:
+        return cls(kind=VariantKind.GUIDED, style=style, point=point)
 
     @classmethod
     def switch(cls, style_switch: StyleSwitch) -> SampleFolder:
@@ -151,11 +176,13 @@ class SampleFolder:
                 case VariantKind.STYLE_SWITCH:
                     return cls.switch(StyleSwitch(before=style, after=Style(match["after"])))
                 case VariantKind.GUIDED:
-                    return cls.guided(style, float(match["scale"]))
+                    point = SamplingPoint.of(float(match["scale"]), float(match["temperature"]), float(match["top_p"]))
+                    return cls.guided(style, point)
                 case _:
                     return cls(kind=kind, style=style)
         raise ValueError(
-            f"pasta de amostras {name!r} fora do contrato <estilo>[_quantizado|_cfg<s>], troca_<a>-<b>, virada_<estilo>"
+            f"pasta de amostras {name!r} fora do contrato <estilo>[_quantizado|_cfg<s>_t<T>_p<P>], "
+            "troca_<a>-<b>, virada_<estilo>"
         )
 
     @property
@@ -164,8 +191,8 @@ class SampleFolder:
 
     @property
     def variant(self) -> str:
-        if self.cfg_scale is not None:
-            return f"{self.kind.value}{self.cfg_scale:g}"
+        if self.point is not None:
+            return f"{self.kind.value}{self.point.label}"
         if self.next_style is not None:
             return f"{self.kind.value}_{self.style.value}-{self.next_style.value}"
         return self.kind.value
@@ -280,9 +307,20 @@ class GenerationSettings:
     top_p: float | None = None
     cfg_scale: float = 3.0
     cfg_scale_sweep: list[float] = field(default_factory=list)
+    temperature_sweep: list[float] = field(default_factory=list)
+    top_p_sweep: list[float] = field(default_factory=list)
     style_switches: list[StyleSwitch] = field(default_factory=lambda: [StyleSwitch(Style.ROCK, Style.FUNK)])
     fill_styles: list[Style] = field(default_factory=list)
     batch_size: int = 100
+
+    @property
+    def sweep_points(self) -> list[SamplingPoint]:
+        temperatures = self.temperature_sweep or [self.temperature]
+        top_ps: list[float | None] = [*self.top_p_sweep] or [self.top_p]
+        return [
+            SamplingPoint.of(cfg_scale, temperature, top_p)
+            for cfg_scale, temperature, top_p in itertools.product(self.cfg_scale_sweep, temperatures, top_ps)
+        ]
 
 
 @dataclass(frozen=True)
@@ -295,6 +333,17 @@ class RenderSettings:
 class EvaluationSettings:
     reference_split: Split = Split.VAL
     output_dir: Path | None = None
+
+
+@dataclass(frozen=True)
+class DemoSettings:
+    final_run: Path | None = None
+    sweep_run: Path | None = None
+    cfg_scales: list[float] = field(default_factory=lambda: [1.0, 1.5, 3.0])
+    style_switches: list[StyleSwitch] = field(
+        default_factory=lambda: [StyleSwitch(Style.ROCK, Style.FUNK), StyleSwitch(Style.JAZZ, Style.HIPHOP)]
+    )
+    output_dir: Path = PROJECT_ROOT
 
 
 @dataclass(frozen=True)
@@ -311,6 +360,7 @@ class ExperimentConfig:
     generation: GenerationSettings = field(default_factory=GenerationSettings)
     render: RenderSettings = field(default_factory=RenderSettings)
     evaluation: EvaluationSettings = field(default_factory=EvaluationSettings)
+    demo: DemoSettings = field(default_factory=DemoSettings)
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

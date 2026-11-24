@@ -10,18 +10,19 @@ from symusic.core import NoteTick, ScoreTick, TempoTick, TrackTick
 
 from drumgen.config import ExperimentConfig, PathSettings, RenderSettings, Style
 from drumgen.render import (
+    DRUM_PIECE_LABELS,
+    DRUM_PIECE_ROWS,
     RELEASE_TAIL_SECONDS,
     AudioRenderer,
     ChartPalette,
     DrumClip,
-    DrumPiece,
     PianoRoll,
     RenderCommand,
     Renderer,
     RenderJob,
     StyleTempos,
 )
-from drumgen.tokenizer import DRUM_CLASSES
+from drumgen.tokenizer import DrumPiece
 
 TICKS_PER_QUARTER = 480
 SIXTEENTH = TICKS_PER_QUARTER // 4
@@ -73,9 +74,11 @@ def onset_seconds(audio: np.ndarray, rate: int, after: float, threshold: float) 
     return (start + int(np.argmax(np.abs(audio[start:].astype(np.float64)) > threshold))) / rate
 
 
-def test_drum_pieces_are_the_nine_tokenizer_classes() -> None:
-    assert {piece.value for piece in DrumPiece} == set(DRUM_CLASSES.values())
-    assert len({piece.label for piece in DrumPiece}) == 9
+def test_every_drum_piece_has_its_own_label_and_piano_roll_row() -> None:
+    assert set(DRUM_PIECE_LABELS) == set(DrumPiece)
+    assert len(set(DRUM_PIECE_LABELS.values())) == len(DrumPiece)
+    assert sorted(DRUM_PIECE_ROWS.values()) == list(range(len(DrumPiece)))
+    assert [DRUM_PIECE_ROWS[piece] for piece in DrumPiece] == list(range(len(DrumPiece)))
 
 
 @pytest.mark.parametrize(
@@ -84,7 +87,7 @@ def test_drum_pieces_are_the_nine_tokenizer_classes() -> None:
         ("data/processed/reference/val/jazz/drummer1-session1-3_0.mid", Style.JAZZ),
         ("runs/x/samples/markov/funk/7.mid", Style.FUNK),
         ("runs/x/samples/transformer/latin_quantizado/7.mid", Style.LATIN),
-        ("runs/x/samples/transformer/soul_cfg1.5/7.mid", Style.SOUL),
+        ("runs/x/samples/transformer/soul_cfg1.5_t0.9_p1/7.mid", Style.SOUL),
         ("runs/x/samples/transformer/troca_rock-funk/7.mid", Style.ROCK),
         ("runs/x/samples/transformer/virada_hiphop/7.mid", Style.HIPHOP),
     ],

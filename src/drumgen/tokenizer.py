@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 from miditok import PerTok, TokenizerConfig, TokSequence
@@ -35,6 +36,25 @@ DRUM_CLASSES: dict[int, int] = {
     53: 51,
     59: 51,
 }
+
+
+
+class DrumPiece(Enum):
+    KICK = 36
+    SNARE = 38
+    CLOSED_HIHAT = 42
+    OPEN_HIHAT = 46
+    LOW_TOM = 43
+    MID_TOM = 47
+    HIGH_TOM = 50
+    CRASH = 49
+    RIDE = 51
+
+    @classmethod
+    def of(cls, pitch: int) -> DrumPiece | None:
+        drum_class = DRUM_CLASSES.get(pitch)
+        return None if drum_class is None else cls(drum_class)
+
 
 SPECIAL_TOKENS = ["PAD", "BOS", "EOS"]
 NOTE_TOKEN_PREFIXES = ("PitchDrum_", "Pitch_")

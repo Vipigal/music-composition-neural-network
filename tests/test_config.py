@@ -7,6 +7,7 @@ import pytest
 
 from drumgen.config import (
     ConfigLoader,
+    DemoSettings,
     EvaluationSettings,
     ExperimentConfig,
     ExperimentRun,
@@ -19,6 +20,7 @@ from drumgen.config import (
     PrepareSettings,
     RenderSettings,
     SampleFolder,
+    SamplingPoint,
     Split,
     Style,
     StyleSwitch,
@@ -146,6 +148,8 @@ def test_tool_sections_default_to_the_spec() -> None:
     assert config.generation.top_p is None
     assert config.generation.cfg_scale == 3.0
     assert config.generation.cfg_scale_sweep == []
+    assert config.generation.temperature_sweep == []
+    assert config.generation.top_p_sweep == []
     assert config.generation.style_switches == [StyleSwitch(before=Style.ROCK, after=Style.FUNK)]
     assert config.generation.fill_styles == []
     assert config.generation.batch_size == 100
@@ -153,6 +157,14 @@ def test_tool_sections_default_to_the_spec() -> None:
     assert config.render.sample_rate == 22050
     assert config.evaluation.reference_split is Split.VAL
     assert config.evaluation.output_dir is None
+    assert config.demo.final_run is None
+    assert config.demo.sweep_run is None
+    assert config.demo.cfg_scales == [1.0, 1.5, 3.0]
+    assert config.demo.style_switches == [
+        StyleSwitch(before=Style.ROCK, after=Style.FUNK),
+        StyleSwitch(before=Style.JAZZ, after=Style.HIPHOP),
+    ]
+    assert config.demo.output_dir == REPO_ROOT
 
 
 def test_model_and_training_default_to_p1() -> None:
@@ -185,10 +197,13 @@ def test_tool_sections_are_overridden_from_yaml(tmp_path: Path) -> None:
         "markov:\n  candidate_orders: [2, 3]\n  order: 3\n"
         "generation:\n"
         "  top_k: 32\n  top_p: 0.9\n  cfg_scale_sweep: [1, 2]\n"
+        "  temperature_sweep: [0.9, 1]\n  top_p_sweep: [0.9, 1]\n"
         "  style_switches:\n    - {before: jazz, after: soul}\n"
         "  fill_styles: [jazz, funk]\n"
         "render:\n  soundfont: sf/drums.sf2\n"
         "evaluation:\n  reference_split: test\n  output_dir: results\n"
+        "demo:\n  final_run: runs/final\n  sweep_run: /x/sweep\n  cfg_scales: [1, 3]\n"
+        "  style_switches:\n    - {before: funk, after: latin}\n  output_dir: entrega\n"
     )
 
     config = ExperimentConfig.from_yaml(config_file)
@@ -198,11 +213,18 @@ def test_tool_sections_are_overridden_from_yaml(tmp_path: Path) -> None:
     assert config.generation.top_k == 32
     assert config.generation.top_p == 0.9
     assert config.generation.cfg_scale_sweep == [1.0, 2.0]
+    assert config.generation.temperature_sweep == [0.9, 1.0]
+    assert config.generation.top_p_sweep == [0.9, 1.0]
     assert config.generation.style_switches == [StyleSwitch(before=Style.JAZZ, after=Style.SOUL)]
     assert config.generation.fill_styles == [Style.JAZZ, Style.FUNK]
     assert config.render.soundfont == REPO_ROOT / "sf" / "drums.sf2"
     assert config.evaluation.reference_split is Split.TEST
     assert config.evaluation.output_dir == REPO_ROOT / "results"
+    assert config.demo.final_run == REPO_ROOT / "runs" / "final"
+    assert config.demo.sweep_run == Path("/x/sweep")
+    assert config.demo.cfg_scales == [1.0, 3.0]
+    assert config.demo.style_switches == [StyleSwitch(before=Style.FUNK, after=Style.LATIN)]
+    assert config.demo.output_dir == REPO_ROOT / "entrega"
 
 
 @pytest.mark.parametrize(
@@ -252,7 +274,7 @@ def test_dump_writes_enums_by_value_and_paths_relative_to_the_project(tmp_path: 
     assert generation["fill_styles"] == ["rock", "funk", "latin", "jazz", "hiphop", "soul"]
 
 
-@pytest.mark.parametrize("config_name", ["debug.yaml", "transformer.yaml", "eval.yaml"])
+@pytest.mark.parametrize("config_name", ["debug.yaml", "transformer.yaml", "eval.yaml", "sweep.yaml", "demo.yaml"])
 def test_run_round_trip_preserves_the_repo_configs(tmp_path: Path, config_name: str) -> None:
     loaded = ExperimentConfig.from_yaml(REPO_ROOT / "configs" / config_name)
     config = dataclasses.replace(loaded, paths=dataclasses.replace(loaded.paths, runs_dir=tmp_path))
@@ -273,11 +295,20 @@ def test_run_round_trip_preserves_every_override(tmp_path: Path) -> None:
             top_k=10,
             top_p=0.8,
             cfg_scale_sweep=[1.0, 4.5],
+            temperature_sweep=[0.8],
+            top_p_sweep=[0.9, 1.0],
             style_switches=[StyleSwitch(before=Style.HIPHOP, after=Style.LATIN)],
             fill_styles=[Style.SOUL],
         ),
         render=RenderSettings(sample_rate=44100),
         evaluation=EvaluationSettings(reference_split=Split.TEST, output_dir=REPO_ROOT / "results"),
+        demo=DemoSettings(
+            final_run=tmp_path / "final",
+            sweep_run=REPO_ROOT / "runs" / "varredura",
+            cfg_scales=[1.0, 2.0],
+            style_switches=[StyleSwitch(before=Style.SOUL, after=Style.ROCK)],
+            output_dir=tmp_path / "entrega",
+        ),
     )
 
     run = ExperimentRun.create(config)
@@ -381,8 +412,8 @@ def test_run_file_with_wrong_type_names_the_key(tmp_path: Path) -> None:
     [
         ("rock", SampleFolder.original(Style.ROCK)),
         ("jazz_quantizado", SampleFolder.quantized(Style.JAZZ)),
-        ("funk_cfg1.5", SampleFolder.guided(Style.FUNK, 1.5)),
-        ("soul_cfg3", SampleFolder.guided(Style.SOUL, 3.0)),
+        ("funk_cfg1.5_t0.9_p0.9", SampleFolder.guided(Style.FUNK, SamplingPoint.of(1.5, 0.9, 0.9))),
+        ("soul_cfg3_t1_p1", SampleFolder.guided(Style.SOUL, SamplingPoint.of(3.0, 1.0, None))),
         ("troca_rock-funk", SampleFolder.switch(StyleSwitch(before=Style.ROCK, after=Style.FUNK))),
         ("virada_hiphop", SampleFolder.fill(Style.HIPHOP)),
     ],
@@ -392,12 +423,32 @@ def test_folder_name_round_trips(name: str, folder: SampleFolder) -> None:
     assert folder.name == name
 
 
+@pytest.mark.parametrize("cfg_scale", [1.0, 1.5, 3.0, 0.25])
+@pytest.mark.parametrize("temperature", [0.9, 1.0, 1.25])
+@pytest.mark.parametrize("top_p", [0.9, 0.95, None])
+def test_guided_folder_name_preserves_the_sampling_point(
+    cfg_scale: float, temperature: float, top_p: float | None
+) -> None:
+    point = SamplingPoint.of(cfg_scale, temperature, top_p)
+
+    parsed = SampleFolder.parse(SampleFolder.guided(Style.JAZZ, point).name).point
+
+    assert parsed == point
+    assert parsed is not None
+    assert (parsed.cfg_scale, parsed.temperature, parsed.top_p) == (cfg_scale, temperature, top_p)
+
+
+def test_top_p_of_one_is_the_same_point_as_no_top_p() -> None:
+    assert SamplingPoint.of(1.5, 0.9, 1.0) == SamplingPoint.of(1.5, 0.9, None)
+    assert SampleFolder.guided(Style.ROCK, SamplingPoint.of(1.5, 0.9, 1.0)).name == "rock_cfg1.5_t0.9_p1"
+
+
 @pytest.mark.parametrize(
     ("name", "variant", "evaluated"),
     [
         ("rock", "original", True),
         ("rock_quantizado", "quantizado", True),
-        ("rock_cfg1.5", "cfg1.5", True),
+        ("rock_cfg1.5_t0.9_p1", "cfg1.5_t0.9_p1", True),
         ("troca_rock-funk", "troca_rock-funk", False),
         ("virada_rock", "virada", False),
     ],
@@ -409,13 +460,52 @@ def test_folder_variant_and_whether_it_has_a_reference(name: str, variant: str, 
     assert folder.kind.has_reference is evaluated
 
 
-@pytest.mark.parametrize("name", ["polka", "other", "null", "rock_lento", "troca_rock", "rock_cfg", "virada_"])
+@pytest.mark.parametrize(
+    "name",
+    ["polka", "other", "null", "rock_lento", "troca_rock", "rock_cfg", "virada_", "rock_cfg1.5", "rock_cfg1.5_t0.9"],
+)
 def test_unknown_folder_name_is_rejected(name: str) -> None:
     with pytest.raises(ValueError, match=name):
         SampleFolder.parse(name)
 
 
 def test_kind_of_each_folder() -> None:
-    assert SampleFolder.parse("rock_cfg3").kind is VariantKind.GUIDED
-    assert SampleFolder.parse("rock_cfg3").cfg_scale == 3.0
+    assert SampleFolder.parse("rock_cfg3_t0.9_p0.9").kind is VariantKind.GUIDED
+    assert SampleFolder.parse("rock_cfg3_t0.9_p0.9").point == SamplingPoint(cfg_scale=3.0, temperature=0.9, top_p=0.9)
+    assert SampleFolder.parse("rock").point is None
     assert SampleFolder.parse("troca_jazz-soul").style_switch == StyleSwitch(before=Style.JAZZ, after=Style.SOUL)
+
+
+def test_selection_styles_are_the_ones_with_validation_of_p2() -> None:
+    assert Style.selection() == [Style.ROCK, Style.FUNK, Style.LATIN, Style.JAZZ]
+
+
+def test_sweep_points_are_the_product_of_the_three_sweeps() -> None:
+    settings = GenerationSettings(cfg_scale_sweep=[1.0, 3.0], temperature_sweep=[0.9, 1.0], top_p_sweep=[0.9, 1.0])
+
+    assert settings.sweep_points == [
+        SamplingPoint.of(cfg_scale, temperature, top_p)
+        for cfg_scale in (1.0, 3.0)
+        for temperature in (0.9, 1.0)
+        for top_p in (0.9, None)
+    ]
+
+
+def test_empty_temperature_and_top_p_sweeps_use_the_single_values() -> None:
+    settings = GenerationSettings(temperature=0.95, top_p=0.8, cfg_scale_sweep=[1.5, 3.0])
+
+    assert settings.sweep_points == [SamplingPoint.of(1.5, 0.95, 0.8), SamplingPoint.of(3.0, 0.95, 0.8)]
+
+
+def test_without_a_guidance_sweep_there_are_no_sweep_points() -> None:
+    assert GenerationSettings(temperature_sweep=[0.9, 1.0], top_p_sweep=[0.9]).sweep_points == []
+
+
+def test_sweep_config_has_the_grid_of_d18() -> None:
+    generation = ExperimentConfig.from_yaml(REPO_ROOT / "configs" / "sweep.yaml").generation
+
+    assert generation.samples_per_style == 100
+    assert generation.cfg_scale_sweep == [1.0, 1.5, 3.0]
+    assert generation.temperature_sweep == [0.9, 1.0]
+    assert generation.top_p_sweep == [0.9, 1.0]
+    assert len(generation.sweep_points) == 12

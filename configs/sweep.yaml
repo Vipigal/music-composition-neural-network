@@ -1,0 +1,6 @@
+name: sweep
+generation:
+  samples_per_style: 100
+  cfg_scale_sweep: [1.0, 1.5, 3.0]
+  temperature_sweep: [0.9, 1.0]
+  top_p_sweep: [0.9, 1.0]

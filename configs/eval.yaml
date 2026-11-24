@@ -1,3 +1,4 @@
 name: eval
 evaluation:
-  reference_split: val
+  reference_split: test
+  output_dir: results

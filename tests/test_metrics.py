@@ -28,13 +28,25 @@ SIXTEENTH = TICKS_PER_QUARTER // 4
 RESOLUTION = MeasurementResolution.of(TokenizerSettings())
 
 
-def score_of(onsets: list[int], is_drum: bool = True, duration: int = 10, velocity: int = 90) -> ScoreTick:
+def score_of(
+    onsets: list[int], is_drum: bool = True, duration: int = 10, velocity: int = 90, pitch: int = 42
+) -> ScoreTick:
+    return score_of_pieces([(onset, pitch) for onset in onsets], is_drum, duration, velocity)
+
+
+def score_of_pieces(
+    hits: list[tuple[int, int]], is_drum: bool = True, duration: int = 10, velocity: int = 90
+) -> ScoreTick:
     score = ScoreTick(TICKS_PER_QUARTER)
     track = TrackTick("Drums", 0, is_drum)
-    for onset in onsets:
-        track.notes.append(NoteTick(onset, duration, 42, velocity))
+    for onset, pitch in hits:
+        track.notes.append(NoteTick(onset, duration, pitch, velocity))
     score.tracks.append(track)
     return score
+
+
+def bars_of(patterns: list[list[int]]) -> list[int]:
+    return [bar * BAR + step * SIXTEENTH for bar, steps in enumerate(patterns) for step in steps]
 
 
 def fixture_window(name: str) -> DrumSample:
@@ -147,6 +159,108 @@ def test_drum_pattern_consistency_sees_swung_offbeats_on_the_twelfth_grid() -> N
     assert {note.time % TICKS_PER_QUARTER for note in sample.pattern_grid.tracks[0].notes} == {0, 280}
 
 
+PATTERN = [0, 2, 4, 6, 8, 10, 12, 14]
+COMPLEMENT = [1, 3, 5, 7, 9, 11, 13, 15]
+
+
+def test_identical_bars_have_full_groove_similarity_despite_microtiming() -> None:
+    onsets = [bar * BAR + position for bar in range(BARS) for position in (0, 250, 480, 1210)]
+
+    metrics = SampleMetrics.measure(DrumSample.from_score(score_of(onsets), BARS))
+
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_ADJACENT) == 1.0
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_FIRST) == 1.0
+
+
+def test_alternating_complementary_bars_have_no_adjacent_similarity() -> None:
+    onsets = bars_of([PATTERN if bar % 2 == 0 else COMPLEMENT for bar in range(BARS)])
+
+    metrics = SampleMetrics.measure(DrumSample.from_score(score_of(onsets), BARS))
+
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_ADJACENT) == 0.0
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_FIRST) == pytest.approx(3 / 7)
+
+
+def test_bars_complementary_to_the_first_have_no_similarity_with_it() -> None:
+    onsets = bars_of([PATTERN, *[COMPLEMENT] * (BARS - 1)])
+
+    metrics = SampleMetrics.measure(DrumSample.from_score(score_of(onsets), BARS))
+
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_FIRST) == 0.0
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_ADJACENT) == pytest.approx(6 / 7)
+
+
+def test_groove_similarity_is_one_minus_the_mean_xor_of_the_bar_patterns() -> None:
+    onsets = bars_of([PATTERN, [0, 2, 4, 6, 8, 10], PATTERN, PATTERN, PATTERN, PATTERN, PATTERN, PATTERN])
+
+    metrics = SampleMetrics.measure(DrumSample.from_score(score_of(onsets), BARS))
+
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_ADJACENT) == pytest.approx((5 + 2 * (1 - 2 / 16)) / 7)
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_FIRST) == pytest.approx((6 + (1 - 2 / 16)) / 7)
+
+
+def test_onset_just_before_the_bar_line_counts_on_the_next_downbeat() -> None:
+    onsets = [bar * BAR for bar in range(BARS)]
+    early = [0, *[bar * BAR - 20 for bar in range(1, BARS)]]
+
+    on_grid = SampleMetrics.measure(DrumSample.from_score(score_of(onsets), BARS))
+    pushed = SampleMetrics.measure(DrumSample.from_score(score_of(early), BARS))
+
+    for metric in (GrooveMetric.GROOVE_SIMILARITY_ADJACENT, GrooveMetric.GROOVE_SIMILARITY_FIRST):
+        assert pushed.value(metric) == on_grid.value(metric) == 1.0
+    assert pushed.value(GrooveMetric.TIMEKEEPING_RATE) == on_grid.value(GrooveMetric.TIMEKEEPING_RATE)
+
+
+def test_onset_rounding_past_the_end_of_the_window_is_left_out_of_the_structure() -> None:
+    onsets = [*[bar * BAR for bar in range(BARS)], BARS * BAR - 20]
+
+    metrics = SampleMetrics.measure(DrumSample.from_score(score_of(onsets, pitch=51), BARS))
+
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_ADJACENT) == 1.0
+    assert metrics.value(GrooveMetric.TIMEKEEPING_RATE) == pytest.approx(BARS / (4 * BARS))
+
+
+def test_single_bar_window_has_undefined_groove_similarity() -> None:
+    metrics = SampleMetrics.measure(DrumSample.from_score(score_of([0, TICKS_PER_QUARTER]), 1))
+
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_ADJACENT) is None
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_FIRST) is None
+    assert metrics.value(GrooveMetric.TIMEKEEPING_RATE) == pytest.approx(2 / 4)
+
+
+def test_ride_on_every_sixteenth_keeps_time_on_every_beat() -> None:
+    onsets = [step * SIXTEENTH for step in range(BARS * 16)]
+
+    metrics = SampleMetrics.measure(DrumSample.from_score(score_of(onsets, pitch=51), BARS))
+
+    assert metrics.value(GrooveMetric.TIMEKEEPING_RATE) == 1.0
+
+
+def test_kick_and_snare_alone_keep_no_time() -> None:
+    hits = [(beat * TICKS_PER_QUARTER, 36 if beat % 2 == 0 else 38) for beat in range(BARS * 4)]
+
+    metrics = SampleMetrics.measure(DrumSample.from_score(score_of_pieces(hits), BARS))
+
+    assert metrics.value(GrooveMetric.TIMEKEEPING_RATE) == 0.0
+
+
+def test_timekeeping_counts_mapped_hihats_and_ride_on_any_sixteenth_of_the_beat() -> None:
+    hits = [
+        (0 * TICKS_PER_QUARTER + 3 * SIXTEENTH + 30, 44),
+        (1 * TICKS_PER_QUARTER + SIXTEENTH, 26),
+        (2 * TICKS_PER_QUARTER + 2 * SIXTEENTH, 53),
+        (3 * TICKS_PER_QUARTER, 42),
+        (3 * TICKS_PER_QUARTER + 2 * SIXTEENTH, 46),
+        (4 * TICKS_PER_QUARTER, 49),
+        (5 * TICKS_PER_QUARTER, 57),
+        (6 * TICKS_PER_QUARTER, 38),
+    ]
+
+    metrics = SampleMetrics.measure(DrumSample.from_score(score_of_pieces(hits), BARS))
+
+    assert metrics.value(GrooveMetric.TIMEKEEPING_RATE) == pytest.approx(4 / (4 * BARS))
+
+
 def test_empty_window_has_no_nan_and_marks_the_undefined_metrics() -> None:
     metrics = SampleMetrics.measure(DrumSample.from_score(score_of([]), BARS))
 
@@ -156,6 +270,9 @@ def test_empty_window_has_no_nan_and_marks_the_undefined_metrics() -> None:
     assert metrics.value(GrooveMetric.SWING) is None
     assert metrics.value(GrooveMetric.MICROTIMING_DEVIATION) is None
     assert metrics.value(GrooveMetric.DRUM_PATTERN_CONSISTENCY) is None
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_ADJACENT) == 1.0
+    assert metrics.value(GrooveMetric.GROOVE_SIMILARITY_FIRST) == 1.0
+    assert metrics.value(GrooveMetric.TIMEKEEPING_RATE) == 0.0
 
 
 @pytest.mark.parametrize("name", ["jazz_120_beat.mid", "funk_117_beat.mid"])

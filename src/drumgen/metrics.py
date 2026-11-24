@@ -12,9 +12,12 @@ import numpy.typing as npt
 from symusic.core import ScoreTick
 
 from drumgen.config import Style, TokenizerSettings
+from drumgen.tokenizer import DrumPiece
 
 BEATS_PER_BAR = 4
 SIXTEENTHS_PER_BEAT = 4
+SIXTEENTHS_PER_BAR = BEATS_PER_BAR * SIXTEENTHS_PER_BEAT
+TIMEKEEPING_PIECES = frozenset({DrumPiece.CLOSED_HIHAT, DrumPiece.OPEN_HIHAT, DrumPiece.RIDE})
 PATTERN_STEPS_PER_BEAT = 12
 SWING_LOW = 0.4
 SWING_HIGH = 0.8
@@ -35,6 +38,9 @@ class GrooveMetric(Enum):
     DENSITY = "density"
     SWING = "swing"
     MICROTIMING_DEVIATION = "microtiming_deviation"
+    GROOVE_SIMILARITY_ADJACENT = "groove_similarity_adjacent"
+    GROOVE_SIMILARITY_FIRST = "groove_similarity_first"
+    TIMEKEEPING_RATE = "timekeeping_rate"
 
 
 class SetMetric(Enum):
@@ -73,6 +79,39 @@ class BeatGrid:
         fractions = self.beat_fractions(onsets)
         offbeats = fractions[(fractions >= SWING_LOW) & (fractions < SWING_HIGH)]
         return float(np.median(offbeats)) if offbeats.size else None
+
+    def onset_steps(self, onsets: npt.NDArray[np.int64], bars: int) -> npt.NDArray[np.bool_]:
+        steps = self.sixteenth_indices(onsets)
+        total = bars * SIXTEENTHS_PER_BAR
+        marked = np.zeros(total, dtype=np.bool_)
+        marked[steps[(steps >= 0) & (steps < total)]] = True
+        return marked
+
+    def covered_beats(self, onsets: npt.NDArray[np.int64], bars: int) -> npt.NDArray[np.bool_]:
+        return self.onset_steps(onsets, bars).reshape(-1, SIXTEENTHS_PER_BEAT).any(axis=1)
+
+
+@dataclass(frozen=True)
+class BarPatterns:
+    steps: npt.NDArray[np.bool_]
+
+    @classmethod
+    def of(cls, grid: BeatGrid, onsets: npt.NDArray[np.int64], bars: int) -> BarPatterns:
+        return cls(grid.onset_steps(onsets, bars).reshape(bars, SIXTEENTHS_PER_BAR))
+
+    @property
+    def adjacent_similarity(self) -> float | None:
+        return self._similarity(self.steps[:-1], self.steps[1:])
+
+    @property
+    def first_bar_similarity(self) -> float | None:
+        return self._similarity(self.steps[:1], self.steps[1:])
+
+    @staticmethod
+    def _similarity(bars: npt.NDArray[np.bool_], others: npt.NDArray[np.bool_]) -> float | None:
+        if not others.size:
+            return None
+        return 1.0 - float(np.mean(np.logical_xor(bars, others)))
 
 
 @dataclass(frozen=True)
@@ -124,6 +163,13 @@ class DrumSample:
         return np.array([note.time for track in self.score.tracks for note in track.notes], dtype=np.int64)
 
     @property
+    def pieces(self) -> list[DrumPiece | None]:
+        return [DrumPiece.of(note.pitch) for track in self.score.tracks for note in track.notes]
+
+    def onsets_of(self, pieces: frozenset[DrumPiece]) -> npt.NDArray[np.int64]:
+        return self.onsets[np.array([piece in pieces for piece in self.pieces], dtype=np.bool_)]
+
+    @property
     def velocities(self) -> npt.NDArray[np.float64]:
         return np.array([note.velocity for track in self.score.tracks for note in track.notes], dtype=np.float64)
 
@@ -150,6 +196,7 @@ class SampleMetrics:
         onsets = sample.onsets
         grid = sample.grid
         music = sample.music()
+        patterns = BarPatterns.of(grid, onsets, sample.bars)
         return cls(
             {
                 GrooveMetric.EMPTY_BEAT_RATE: cls._defined(muspy.empty_beat_rate(music)),
@@ -163,6 +210,11 @@ class SampleMetrics:
                 GrooveMetric.SWING: grid.swing(onsets),
                 GrooveMetric.MICROTIMING_DEVIATION: (
                     float(np.mean(np.abs(grid.offsets(onsets)))) if onsets.size else None
+                ),
+                GrooveMetric.GROOVE_SIMILARITY_ADJACENT: patterns.adjacent_similarity,
+                GrooveMetric.GROOVE_SIMILARITY_FIRST: patterns.first_bar_similarity,
+                GrooveMetric.TIMEKEEPING_RATE: float(
+                    np.mean(grid.covered_beats(sample.onsets_of(TIMEKEEPING_PIECES), sample.bars))
                 ),
             }
         )

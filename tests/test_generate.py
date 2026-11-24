@@ -18,6 +18,7 @@ from drumgen.config import (
     PathSettings,
     PieceType,
     SampleFolder,
+    SamplingPoint,
     Style,
     StyleSwitch,
     System,
@@ -263,9 +264,98 @@ def test_guidance_sweep_run_generates_only_the_sweep(tokenizer: DrumTokenizer, t
     )
 
     folders = {path.name for path in tmp_path.iterdir() if path.is_dir()}
-    assert folders == {f"{style.value}_cfg{scale}" for style in Style.evaluated() for scale in ("1", "1.5")}
+    assert folders == {f"{style.value}_cfg{scale}_t1_p1" for style in Style.evaluated() for scale in ("1", "1.5")}
     rows = read_manifest(report.manifest_file)
-    assert {row["cfg_scale"] for row in rows if row["folder"] == "rock_cfg1.5"} == {"1.5"}
+    assert {row["cfg_scale"] for row in rows if row["folder"] == "rock_cfg1.5_t1_p1"} == {"1.5"}
+
+
+def test_sweep_of_d18_writes_twelve_folders_per_style_and_no_final_folders(
+    tokenizer: DrumTokenizer, tmp_path: Path
+) -> None:
+    sweep = ExperimentConfig.from_yaml(Path(__file__).resolve().parents[1] / "configs" / "sweep.yaml").generation
+    generator = ScriptedGenerator(tokenizer, ALL_CAPABILITIES)
+
+    batch(
+        tokenizer,
+        generator,
+        samples_per_style=1,
+        cfg_scale_sweep=sweep.cfg_scale_sweep,
+        temperature_sweep=sweep.temperature_sweep,
+        top_p_sweep=sweep.top_p_sweep,
+    ).run(tmp_path)
+
+    folders = {path.name for path in tmp_path.iterdir() if path.is_dir()}
+    for style in Style.evaluated():
+        assert len({folder for folder in folders if folder.startswith(f"{style.value}_cfg")}) == 12
+        assert style.value not in folders
+        assert f"{style.value}_quantizado" not in folders
+    assert len(folders) == 12 * len(Style.evaluated())
+    assert not list(tmp_path.glob("troca_*"))
+
+
+def test_sweep_requests_carry_the_temperature_and_top_p_of_their_point(tokenizer: DrumTokenizer, tmp_path: Path) -> None:
+    generator = ScriptedGenerator(tokenizer, ALL_CAPABILITIES)
+
+    report = batch(
+        tokenizer,
+        generator,
+        samples_per_style=1,
+        temperature=0.7,
+        top_k=12,
+        top_p=0.5,
+        cfg_scale_sweep=[1.5, 3.0],
+        temperature_sweep=[0.9, 1.0],
+        top_p_sweep=[0.9, 1.0],
+    ).run(tmp_path)
+
+    points = {(request.cfg_scale, request.temperature, request.top_p) for request in generator.requests}
+    assert points == {
+        (scale, temperature, top_p) for scale in (1.5, 3.0) for temperature in (0.9, 1.0) for top_p in (0.9, None)
+    }
+    assert {request.top_k for request in generator.requests} == {12}
+    for request in generator.requests:
+        assert request.cfg_scale is not None
+        point = SamplingPoint.of(request.cfg_scale, request.temperature, request.top_p)
+        assert (tmp_path / SampleFolder.guided(request.plan[0].style, point).name / f"{request.seed}.mid").is_file()
+    rows = {row["folder"]: row for row in read_manifest(report.manifest_file)}
+    assert (rows["jazz_cfg3_t0.9_p0.9"]["cfg_scale"], rows["jazz_cfg3_t0.9_p0.9"]["temperature"]) == ("3.0", "0.9")
+    assert rows["jazz_cfg3_t0.9_p0.9"]["top_p"] == "0.9"
+    assert rows["jazz_cfg3_t0.9_p1"]["top_p"] == ""
+    assert rows["jazz_cfg3_t0.9_p1"]["variant"] == "cfg3_t0.9_p1"
+
+
+def test_empty_temperature_and_top_p_sweeps_use_the_single_values(tokenizer: DrumTokenizer, tmp_path: Path) -> None:
+    generator = ScriptedGenerator(tokenizer, ALL_CAPABILITIES)
+
+    batch(tokenizer, generator, samples_per_style=1, temperature=0.95, top_p=0.8, cfg_scale_sweep=[3.0]).run(tmp_path)
+
+    assert {path.name for path in tmp_path.iterdir() if path.is_dir()} == {
+        f"{style.value}_cfg3_t0.95_p0.8" for style in Style.evaluated()
+    }
+    assert {(request.temperature, request.top_p) for request in generator.requests} == {(0.95, 0.8)}
+
+
+def test_final_run_ignores_temperature_and_top_p_sweeps_without_a_guidance_sweep(
+    tokenizer: DrumTokenizer, tmp_path: Path
+) -> None:
+    generator = ScriptedGenerator(tokenizer, ALL_CAPABILITIES)
+
+    batch(
+        tokenizer,
+        generator,
+        samples_per_style=1,
+        temperature=0.9,
+        top_p=0.9,
+        cfg_scale=1.5,
+        temperature_sweep=[0.8, 1.0],
+        top_p_sweep=[0.7],
+    ).run(tmp_path)
+
+    folders = {path.name for path in tmp_path.iterdir() if path.is_dir()}
+    assert folders == {
+        name for style in Style.evaluated() for name in (style.value, f"{style.value}_quantizado")
+    } | {"troca_rock-funk"}
+    assert {(request.cfg_scale, request.temperature, request.top_p) for request in generator.requests} == {(1.5, 0.9, 0.9)}
 
 
 def test_seeds_are_generated_in_batches_without_extra_attempts(tokenizer: DrumTokenizer, tmp_path: Path) -> None:
