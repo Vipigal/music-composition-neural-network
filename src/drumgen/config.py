@@ -239,6 +239,27 @@ class DataSettings:
 
 
 @dataclass(frozen=True)
+class ModelSettings:
+    d_model: int = 256
+    layers: int = 4
+    heads: int = 4
+    feedforward: int = 1024
+    dropout: float = 0.1
+
+
+@dataclass(frozen=True)
+class TrainingSettings:
+    batch_size: int = 32
+    learning_rate: float = 3e-4
+    weight_decay: float = 0.01
+    warmup_steps: int = 300
+    gradient_clip: float = 1.0
+    max_epochs: int = 200
+    patience: int = 15
+    device: str = "cuda"
+
+
+@dataclass(frozen=True)
 class MarkovSettings:
     candidate_orders: list[int] = field(default_factory=lambda: [1, 2, 3, 4, 6, 8, 12, 16])
     order: int | None = None
@@ -258,9 +279,10 @@ class GenerationSettings:
     top_k: int | None = None
     top_p: float | None = None
     cfg_scale: float = 3.0
-    cfg_scale_sweep: list[float] = field(default_factory=lambda: [1.0, 1.5, 3.0])
+    cfg_scale_sweep: list[float] = field(default_factory=list)
     style_switches: list[StyleSwitch] = field(default_factory=lambda: [StyleSwitch(Style.ROCK, Style.FUNK)])
-    fill_styles: list[Style] = field(default_factory=Style.evaluated)
+    fill_styles: list[Style] = field(default_factory=list)
+    batch_size: int = 100
 
 
 @dataclass(frozen=True)
@@ -283,7 +305,9 @@ class ExperimentConfig:
     tokenizer: TokenizerSettings = field(default_factory=TokenizerSettings)
     prepare: PrepareSettings = field(default_factory=PrepareSettings)
     data: DataSettings = field(default_factory=DataSettings)
-    markov: MarkovSettings = field(default_factory=MarkovSettings)
+    model: ModelSettings = field(default_factory=ModelSettings)
+    training: TrainingSettings = field(default_factory=TrainingSettings)
+    markov:MarkovSettings = field(default_factory=MarkovSettings)
     generation: GenerationSettings = field(default_factory=GenerationSettings)
     render: RenderSettings = field(default_factory=RenderSettings)
     evaluation: EvaluationSettings = field(default_factory=EvaluationSettings)

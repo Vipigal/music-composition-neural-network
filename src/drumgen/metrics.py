@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -15,6 +15,7 @@ from drumgen.config import Style, TokenizerSettings
 
 BEATS_PER_BAR = 4
 SIXTEENTHS_PER_BEAT = 4
+PATTERN_STEPS_PER_BEAT = 12
 SWING_LOW = 0.4
 SWING_HIGH = 0.8
 WINDOW_END_MARKER = "fim da janela"
@@ -55,6 +56,10 @@ class BeatGrid:
     def quantize(self, onsets: npt.NDArray[np.int64]) -> npt.NDArray[np.int64]:
         return np.rint(self.sixteenth_indices(onsets) * self.sixteenth).astype(np.int64)
 
+    def quantize_to(self, onsets: npt.NDArray[np.int64], steps_per_beat: int) -> npt.NDArray[np.int64]:
+        step = self.ticks_per_quarter / steps_per_beat
+        return np.rint(np.round(onsets / step) * step).astype(np.int64)
+
     def offsets(self, onsets: npt.NDArray[np.int64]) -> npt.NDArray[np.float64]:
         return onsets / self.sixteenth - self.sixteenth_indices(onsets)
 
@@ -74,6 +79,7 @@ class BeatGrid:
 class DrumSample:
     score: ScoreTick
     quantized: ScoreTick
+    pattern_grid: ScoreTick
     bars: int
 
     @classmethod
@@ -89,13 +95,21 @@ class DrumSample:
         late = [note.time for track in drums.tracks for note in track.notes if note.time >= window_ticks]
         if late:
             raise ValueError(f"nota no tick {late[0]}, depois do fim da janela de {bars} compassos ({window_ticks})")
-        quantized = drums.copy()
         grid = BeatGrid(drums.ticks_per_quarter)
-        for track in quantized.tracks:
-            onsets = grid.quantize(np.array([note.time for note in track.notes], dtype=np.int64))
+        quantized = cls._moved(drums, grid.quantize)
+        pattern_grid = cls._moved(drums, lambda onsets: grid.quantize_to(onsets, PATTERN_STEPS_PER_BEAT))
+        return cls(score=drums, quantized=quantized, pattern_grid=pattern_grid, bars=bars)
+
+    @staticmethod
+    def _moved(
+        score: ScoreTick, place: Callable[[npt.NDArray[np.int64]], npt.NDArray[np.int64]]
+    ) -> ScoreTick:
+        moved = score.copy()
+        for track in moved.tracks:
+            onsets = place(np.array([note.time for note in track.notes], dtype=np.int64))
             for note, onset in zip(track.notes, onsets, strict=True):
                 note.time = int(onset)
-        return cls(score=drums, quantized=quantized, bars=bars)
+        return moved
 
     @property
     def grid(self) -> BeatGrid:
@@ -113,8 +127,8 @@ class DrumSample:
     def velocities(self) -> npt.NDArray[np.float64]:
         return np.array([note.velocity for track in self.score.tracks for note in track.notes], dtype=np.float64)
 
-    def music(self, quantized: bool = False) -> muspy.Music:
-        score = self.quantized if quantized else self.score
+    def music(self, score: ScoreTick | None = None) -> muspy.Music:
+        score = self.score if score is None else score
         last_tick = self.window_ticks - 1
         notes = [
             muspy.Note(time=note.time, pitch=note.pitch, duration=0, velocity=note.velocity)
@@ -143,7 +157,7 @@ class SampleMetrics:
                     muspy.groove_consistency(music, BEATS_PER_BAR * music.resolution)
                 ),
                 GrooveMetric.DRUM_PATTERN_CONSISTENCY: cls._defined(
-                    muspy.drum_pattern_consistency(sample.music(quantized=True))
+                    muspy.drum_pattern_consistency(sample.music(sample.pattern_grid))
                 ),
                 GrooveMetric.DENSITY: onsets.size / sample.bars,
                 GrooveMetric.SWING: grid.swing(onsets),

@@ -3,3 +3,5 @@ paths:
   processed_dir: data/processed_debug
 prepare:
   pieces_per_split: 12
+training:
+  max_epochs: 3

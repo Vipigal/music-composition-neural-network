@@ -128,12 +128,23 @@ def test_groove_consistency_spans_the_whole_window() -> None:
     assert metrics.value(GrooveMetric.GROOVE_CONSISTENCY) == pytest.approx(1 - len(pattern) / (BAR * (BARS - 1)))
 
 
-def test_drum_pattern_consistency_reads_the_quantized_copy() -> None:
+def test_drum_pattern_consistency_keeps_straight_sixteenths_with_small_deviations_in_pattern() -> None:
     onsets = [step * SIXTEENTH + (17 if step % 2 else -13) for step in range(1, 32)]
 
     metrics = SampleMetrics.measure(DrumSample.from_score(score_of(onsets), BARS))
 
     assert metrics.value(GrooveMetric.DRUM_PATTERN_CONSISTENCY) == pytest.approx(1.0)
+
+
+def test_drum_pattern_consistency_sees_swung_offbeats_on_the_twelfth_grid() -> None:
+    swung_offbeat = round(0.583 * TICKS_PER_QUARTER)
+    onsets = [beat * TICKS_PER_QUARTER + position for beat in range(16) for position in (0, swung_offbeat)]
+
+    sample = DrumSample.from_score(score_of(onsets), BARS)
+    metrics = SampleMetrics.measure(sample)
+
+    assert metrics.value(GrooveMetric.DRUM_PATTERN_CONSISTENCY) == pytest.approx(0.5)
+    assert {note.time % TICKS_PER_QUARTER for note in sample.pattern_grid.tracks[0].notes} == {0, 280}
 
 
 def test_empty_window_has_no_nan_and_marks_the_undefined_metrics() -> None:

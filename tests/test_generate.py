@@ -1,10 +1,12 @@
 import csv
 import dataclasses
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+import torch
 from symusic.core import ScoreTick
 
 from drumgen.config import (
@@ -12,6 +14,7 @@ from drumgen.config import (
     ExperimentRun,
     GenerationSettings,
     MarkovSettings,
+    ModelSettings,
     PathSettings,
     PieceType,
     SampleFolder,
@@ -24,16 +27,17 @@ from drumgen.config import (
 from drumgen.evaluate import Evaluator
 from drumgen.generate import (
     MANIFEST_COLUMNS,
-    BarPlan,
     BatchGenerator,
     GenerateCommand,
     GeneratedSequence,
     Generation,
-    GenerationRequest,
     MarkovGenerator,
+    TransformerGenerator,
 )
 from drumgen.markov import MarkovBaseline, MarkovTrainer
+from drumgen.model import ComputeDevice, DrumTransformer, ModelCheckpoint
 from drumgen.prepare import Preparer
+from drumgen.sampling import BarPlan, GenerationRequest, SpecialTokens, TokenSampler
 from drumgen.tokenizer import TICKS_PER_QUARTER, DrumTokenizer
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -60,6 +64,7 @@ BAR_CONTENT = [
 NOTES_PER_BAR = 4
 ALL_CAPABILITIES = frozenset({VariantKind.GUIDED, VariantKind.STYLE_SWITCH, VariantKind.FILL})
 NO_CAPABILITIES: frozenset[VariantKind] = frozenset()
+SMALL_MODEL = ModelSettings(d_model=32, layers=2, heads=2, feedforward=64, dropout=0.0)
 
 
 @pytest.fixture(scope="module")
@@ -76,8 +81,13 @@ class ScriptedGenerator:
     dangling_pitch: bool = False
     bars_returned: int | None = None
     requests: list[GenerationRequest] = field(default_factory=list)
+    batch_sizes: list[int] = field(default_factory=list)
 
-    def generate(self, request: GenerationRequest) -> GeneratedSequence:
+    def generate(self, requests: Sequence[GenerationRequest]) -> list[GeneratedSequence]:
+        self.batch_sizes.append(len(requests))
+        return [self._one(request) for request in requests]
+
+    def _one(self, request: GenerationRequest) -> GeneratedSequence:
         self.requests.append(request)
         bar = [self.tokenizer.id_of(token) for token in BAR_CONTENT]
         if request.seed in self.early_seeds:
@@ -212,10 +222,8 @@ def test_unsupported_variants_are_skipped_with_a_warning(tokenizer: DrumTokenize
     report = batch(tokenizer, generator, samples_per_style=1).run(tmp_path)
 
     assert not list(tmp_path.glob("*_cfg*")) and not list(tmp_path.glob("troca_*")) and not list(tmp_path.glob("virada_*"))
-    assert len(report.warnings) == 3
-    assert any("cfg" in warning for warning in report.warnings)
+    assert len(report.warnings) == 1
     assert any("troca_rock-funk" in warning for warning in report.warnings)
-    assert any("virada" in warning for warning in report.warnings)
     assert all(request.cfg_scale is None for request in generator.requests)
 
 
@@ -226,27 +234,48 @@ def test_supported_variants_get_their_own_plan_and_guidance(tokenizer: DrumToken
         tokenizer,
         generator,
         samples_per_style=1,
-        cfg_scale=3.0,
-        cfg_scale_sweep=[1.0, 1.5],
+        cfg_scale=1.5,
+        cfg_scale_sweep=[],
         style_switches=[StyleSwitch(Style.ROCK, Style.FUNK)],
         fill_styles=[Style.JAZZ],
     ).run(tmp_path)
 
     assert report.warnings == []
     folders = {path.name for path in tmp_path.iterdir() if path.is_dir()}
-    assert {"rock_cfg1", "rock_cfg1.5", "soul_cfg1.5", "troca_rock-funk", "virada_jazz"} <= folders
+    assert {"rock", "rock_quantizado", "troca_rock-funk", "virada_jazz"} <= folders
+    assert not list(tmp_path.glob("*_cfg*"))
     assert not (tmp_path / "virada_rock").exists()
-    by_scale = {request.cfg_scale for request in generator.requests if request.plan[0].style is Style.SOUL}
-    assert by_scale == {3.0, 1.0, 1.5}
+    assert {request.cfg_scale for request in generator.requests} == {1.5}
     switch = next(request for request in generator.requests if request.plan[0].style is not request.plan[-1].style)
     assert [bar.style for bar in switch.plan] == [Style.ROCK] * 4 + [Style.FUNK] * 4
-    assert switch.cfg_scale == 3.0
     fill = next(request for request in generator.requests if request.plan[-1].piece_type is PieceType.FILL)
     assert [bar.piece_type for bar in fill.plan] == [PieceType.GROOVE] * (BARS - 1) + [PieceType.FILL]
     assert {bar.style for bar in fill.plan} == {Style.JAZZ}
     rows = read_manifest(report.manifest_file)
-    assert {row["cfg_scale"] for row in rows if row["folder"] == "rock_cfg1.5"} == {"1.5"}
     assert {row["variant"] for row in rows if row["folder"] == "troca_rock-funk"} == {"troca_rock-funk"}
+
+
+def test_guidance_sweep_run_generates_only_the_sweep(tokenizer: DrumTokenizer, tmp_path: Path) -> None:
+    generator = ScriptedGenerator(tokenizer, ALL_CAPABILITIES)
+
+    report = batch(tokenizer, generator, samples_per_style=1, cfg_scale_sweep=[1.0, 1.5], fill_styles=[Style.JAZZ]).run(
+        tmp_path
+    )
+
+    folders = {path.name for path in tmp_path.iterdir() if path.is_dir()}
+    assert folders == {f"{style.value}_cfg{scale}" for style in Style.evaluated() for scale in ("1", "1.5")}
+    rows = read_manifest(report.manifest_file)
+    assert {row["cfg_scale"] for row in rows if row["folder"] == "rock_cfg1.5"} == {"1.5"}
+
+
+def test_seeds_are_generated_in_batches_without_extra_attempts(tokenizer: DrumTokenizer, tmp_path: Path) -> None:
+    generator = ScriptedGenerator(tokenizer, NO_CAPABILITIES, early_seeds=frozenset({11, 12}))
+
+    report = batch(tokenizer, generator, samples_per_style=5, batch_size=4).run(tmp_path)
+
+    assert seeds_in(tmp_path / "rock") == [10, 13, 14, 15, 16]
+    assert generator.batch_sizes[:2] == [4, 3]
+    assert report.attempts[SampleFolder.original(Style.ROCK)] == 7
 
 
 def test_complete_sequence_with_the_wrong_number_of_bars_is_refused(tokenizer: DrumTokenizer, tmp_path: Path) -> None:
@@ -324,7 +353,7 @@ def test_markov_adapter_passes_the_baseline_sample_through(markov_run: Experimen
         plan=(BarPlan(Style.FUNK, PieceType.GROOVE),) * BARS, seed=4, cfg_scale=None, temperature=1.0, top_k=None, top_p=None
     )
 
-    generated = generator.generate(request)
+    generated = generator.generate([request])[0]
 
     expected = baseline.sample(Style.FUNK, seed=4, bars=BARS)
     assert generated.ids == expected.ids
@@ -353,7 +382,7 @@ def test_markov_adapter_refuses_controls_the_chain_does_not_have(
     )
 
     with pytest.raises(ValueError):
-        generator.generate(dataclasses.replace(request, **change))
+        generator.generate([dataclasses.replace(request, **change)])
 
 
 def test_command_writes_into_the_model_run_by_default(tmp_path: Path) -> None:
@@ -412,6 +441,26 @@ def test_missing_output_run_is_refused(markov_run: ExperimentRun, tmp_path: Path
         Generation(markov_run.record.config).run(System.MARKOV, markov_run.path, tmp_path / "nao_existe")
 
 
-def test_system_without_a_generator_is_refused(markov_run: ExperimentRun) -> None:
-    with pytest.raises(ValueError, match="transformer"):
+def test_transformer_run_without_a_checkpoint_is_refused(markov_run: ExperimentRun) -> None:
+    with pytest.raises(FileNotFoundError, match="best.pt"):
         Generation(markov_run.record.config).run(System.TRANSFORMER, markov_run.path, markov_run.path)
+
+
+def test_transformer_adapter_samples_from_the_best_checkpoint(tokenizer: DrumTokenizer, tmp_path: Path) -> None:
+    torch.manual_seed(0)
+    model = DrumTransformer(SMALL_MODEL, tokenizer.vocab_size, 64, tokenizer.pad_id).eval()
+    ModelCheckpoint.of(model, tmp_path / "tokenizer.json", epoch=1).save(tmp_path / "best.pt")
+    cpu = ComputeDevice.resolve("cpu")
+    requests = [
+        GenerationRequest(
+            plan=(BarPlan(Style.JAZZ, PieceType.GROOVE),) * 2, seed=seed, cfg_scale=2.0, temperature=1.0, top_k=5, top_p=None
+        )
+        for seed in (1, 2)
+    ]
+
+    generator = TransformerGenerator.load(tmp_path, tokenizer, cpu)
+    generated = generator.generate(requests)
+
+    expected = TokenSampler(model, SpecialTokens.of(tokenizer), cpu).sample(requests)
+    assert [sequence.ids for sequence in generated] == expected
+    assert generator.capabilities == frozenset({VariantKind.GUIDED, VariantKind.STYLE_SWITCH})

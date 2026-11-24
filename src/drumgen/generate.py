@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TextIO
 
+import torch
 from tqdm import tqdm
 
 from drumgen.config import (
@@ -22,6 +23,8 @@ from drumgen.config import (
     VariantKind,
 )
 from drumgen.markov import MarkovBaseline, MarkovTrainer
+from drumgen.model import ComputeDevice, ModelCheckpoint
+from drumgen.sampling import BarPlan, GenerationRequest, SpecialTokens, TokenSampler
 from drumgen.tokenizer import DrumTokenizer
 
 MANIFEST_FILE = "manifest.csv"
@@ -49,26 +52,6 @@ MANIFEST_COLUMNS = [
 
 
 @dataclass(frozen=True)
-class BarPlan:
-    style: Style
-    piece_type: PieceType
-
-
-@dataclass(frozen=True)
-class GenerationRequest:
-    plan: tuple[BarPlan, ...]
-    seed: int
-    cfg_scale: float | None
-    temperature: float
-    top_k: int | None
-    top_p: float | None
-
-    @property
-    def bars(self) -> int:
-        return len(self.plan)
-
-
-@dataclass(frozen=True)
 class GeneratedSequence:
     ids: list[int]
 
@@ -77,7 +60,7 @@ class DrumGenerator(Protocol):
     @property
     def capabilities(self) -> frozenset[VariantKind]: ...
 
-    def generate(self, request: GenerationRequest) -> GeneratedSequence: ...
+    def generate(self, requests: Sequence[GenerationRequest]) -> list[GeneratedSequence]: ...
 
 
 class MarkovGenerator:
@@ -92,7 +75,10 @@ class MarkovGenerator:
     def capabilities(self) -> frozenset[VariantKind]:
         return frozenset()
 
-    def generate(self, request: GenerationRequest) -> GeneratedSequence:
+    def generate(self, requests: Sequence[GenerationRequest]) -> list[GeneratedSequence]:
+        return [self._one(request) for request in requests]
+
+    def _one(self, request: GenerationRequest) -> GeneratedSequence:
         styles = {bar.style for bar in request.plan}
         if len(styles) != 1 or any(bar.piece_type is not PieceType.GROOVE for bar in request.plan):
             raise ValueError("o Markov gera grooves de um estilo só, sem plano por compasso nem virada")
@@ -102,14 +88,38 @@ class MarkovGenerator:
         return GeneratedSequence(ids=self._baseline.sample(styles.pop(), request.seed, request.bars).ids)
 
 
+class TransformerGenerator:
+    CHECKPOINT_FILE = "best.pt"
+
+    def __init__(self, sampler: TokenSampler) -> None:
+        self._sampler = sampler
+
+    @classmethod
+    def load(cls, model: Path, tokenizer: DrumTokenizer, device: torch.device) -> TransformerGenerator:
+        checkpoint_file = model / cls.CHECKPOINT_FILE
+        if not checkpoint_file.is_file():
+            raise FileNotFoundError(f"{checkpoint_file}: a run do Transformer precisa do {cls.CHECKPOINT_FILE} do treino")
+        network = ModelCheckpoint.load(checkpoint_file).build_model().to(device).eval()
+        return cls(TokenSampler(network, SpecialTokens.of(tokenizer), device))
+
+    @property
+    def capabilities(self) -> frozenset[VariantKind]:
+        return frozenset({VariantKind.GUIDED, VariantKind.STYLE_SWITCH})
+
+    def generate(self, requests: Sequence[GenerationRequest]) -> list[GeneratedSequence]:
+        return [GeneratedSequence(ids=ids) for ids in self._sampler.sample(requests)]
+
+
 class GeneratorLoader:
     @staticmethod
-    def load(system: System, model: Path, tokenizer: DrumTokenizer) -> DrumGenerator:
+    def load(system: System, model: Path, tokenizer: DrumTokenizer, device: torch.device) -> DrumGenerator:
         match system:
             case System.MARKOV:
                 return MarkovGenerator.load(model, tokenizer)
+            case System.TRANSFORMER:
+                return TransformerGenerator.load(model, tokenizer, device)
             case _:
-                raise ValueError(f"o sistema {system.value} ainda não tem gerador ligado à geração em lote")
+                raise ValueError(f"o sistema {system.value} não tem gerador ligado à geração em lote")
 
 
 @dataclass(frozen=True)
@@ -225,11 +235,14 @@ class BatchGenerator:
             raise ValueError(f"o gerador de {self._system.value} declara variantes que não são capacidades: {names}")
         settings = self._settings
         bars = self._bars
-        cfg_scale = settings.cfg_scale if VariantKind.GUIDED in capabilities else None
-        candidates: dict[VariantKind, list[GenerationJob]] = {
-            VariantKind.GUIDED: [
+        guided = VariantKind.GUIDED in capabilities
+        if guided and settings.cfg_scale_sweep:
+            sweep = [
                 GenerationJob.guided(style, bars, scale) for style in Style.evaluated() for scale in settings.cfg_scale_sweep
-            ],
+            ]
+            return sweep, []
+        cfg_scale = settings.cfg_scale if guided else None
+        candidates: dict[VariantKind, list[GenerationJob]] = {
             VariantKind.STYLE_SWITCH: [GenerationJob.switch(switch, bars, cfg_scale) for switch in settings.style_switches],
             VariantKind.FILL: [GenerationJob.fill(style, bars, cfg_scale) for style in settings.fill_styles],
         }
@@ -246,31 +259,39 @@ class BatchGenerator:
     def _run_job(
         self, job: GenerationJob, output: Path, manifest: GenerationManifest, advance: Callable[[], object]
     ) -> int:
-        limit = self._settings.samples_per_style * MAX_ATTEMPTS_PER_SAMPLE
+        target = self._settings.samples_per_style
+        limit = target * MAX_ATTEMPTS_PER_SAMPLE
         seed = self._settings.first_seed
         written = 0
         attempts = 0
-        while written < self._settings.samples_per_style:
-            if attempts == limit:
+        while written < target:
+            if attempts >= limit:
                 raise RuntimeError(
                     f"{self._system.value}/{job.folder.name}: {attempts - written} de {attempts} tentativas terminaram "
                     f"em EOS antes de {self._bars} compassos"
                 )
-            request = job.request(seed, self._settings)
-            ids = self._generator.generate(request).ids
-            attempts += 1
-            seed += 1
-            complete = self._tokenizer.eos_id not in ids
-            if complete:
-                self._check_bars(job.folder, request, ids)
-            self._save(job.folder, request, ids, output, manifest, complete)
-            if complete and job.folder.kind is VariantKind.ORIGINAL:
-                quantized = SampleFolder.quantized(job.folder.style)
-                self._save(quantized, request, self._tokenizer.quantize(ids), output, manifest, True)
-            if complete:
-                written += 1
-                advance()
+            size = min(self._settings.batch_size, target - written, limit - attempts)
+            requests = [job.request(seed + offset, self._settings) for offset in range(size)]
+            generated = self._generator.generate(requests)
+            attempts += size
+            seed += size
+            for request, sequence in zip(requests, generated, strict=True):
+                if self._record(job, request, sequence.ids, output, manifest):
+                    written += 1
+                    advance()
         return attempts
+
+    def _record(
+        self, job: GenerationJob, request: GenerationRequest, ids: Sequence[int], output: Path, manifest: GenerationManifest
+    ) -> bool:
+        complete = self._tokenizer.eos_id not in ids
+        if complete:
+            self._check_bars(job.folder, request, ids)
+        self._save(job.folder, request, ids, output, manifest, complete)
+        if complete and job.folder.kind is VariantKind.ORIGINAL:
+            quantized = SampleFolder.quantized(job.folder.style)
+            self._save(quantized, request, self._tokenizer.quantize(ids), output, manifest, True)
+        return complete
 
     def _check_bars(self, folder: SampleFolder, request: GenerationRequest, ids: Sequence[int]) -> None:
         bars = self._tokenizer.count_bars(ids)
@@ -310,7 +331,8 @@ class Generation:
         for experiment in (ExperimentRun.open(model), output):
             experiment.check_compatible(self._config)
         tokenizer = DrumTokenizer.from_file(self._config.paths.tokenizer_file)
-        generator = GeneratorLoader.load(system, model, tokenizer)
+        device = ComputeDevice.resolve(self._config.training.device)
+        generator = GeneratorLoader.load(system, model, tokenizer, device)
         batch = BatchGenerator(
             generator, tokenizer, self._config.generation, self._config.prepare.reference_bars, system
         )

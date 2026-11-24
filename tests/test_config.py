@@ -13,6 +13,7 @@ from drumgen.config import (
     GenerationSettings,
     GitRevision,
     MarkovSettings,
+    ModelSettings,
     PathSettings,
     PieceType,
     PrepareSettings,
@@ -144,13 +145,37 @@ def test_tool_sections_default_to_the_spec() -> None:
     assert config.generation.top_k is None
     assert config.generation.top_p is None
     assert config.generation.cfg_scale == 3.0
-    assert config.generation.cfg_scale_sweep == [1.0, 1.5, 3.0]
+    assert config.generation.cfg_scale_sweep == []
     assert config.generation.style_switches == [StyleSwitch(before=Style.ROCK, after=Style.FUNK)]
-    assert config.generation.fill_styles == Style.evaluated()
+    assert config.generation.fill_styles == []
+    assert config.generation.batch_size == 100
     assert config.render.soundfont == Path("/usr/share/sounds/sf2/FluidR3_GM.sf2")
     assert config.render.sample_rate == 22050
     assert config.evaluation.reference_split is Split.VAL
     assert config.evaluation.output_dir is None
+
+
+def test_model_and_training_default_to_p1() -> None:
+    config = ExperimentConfig(name="x")
+
+    assert config.model == ModelSettings(d_model=256, layers=4, heads=4, feedforward=1024, dropout=0.1)
+    assert config.training.batch_size == 32
+    assert config.training.learning_rate == 3e-4
+    assert config.training.weight_decay == 0.01
+    assert config.training.warmup_steps == 300
+    assert config.training.gradient_clip == 1.0
+    assert config.training.device == "cuda"
+
+
+def test_model_and_training_are_overridden_from_yaml(tmp_path: Path) -> None:
+    config_file = tmp_path / "cfg.yaml"
+    config_file.write_text("name: x\nmodel:\n  layers: 2\ntraining:\n  max_epochs: 3\n  device: cpu\n")
+
+    config = ExperimentConfig.from_yaml(config_file)
+
+    assert config.model.layers == 2
+    assert config.training.max_epochs == 3
+    assert config.training.device == "cpu"
 
 
 def test_tool_sections_are_overridden_from_yaml(tmp_path: Path) -> None:
@@ -208,7 +233,11 @@ def test_unknown_key_inside_a_list_is_rejected(tmp_path: Path) -> None:
 
 
 def test_dump_writes_enums_by_value_and_paths_relative_to_the_project(tmp_path: Path) -> None:
-    config = ExperimentConfig(name="x", paths=PathSettings(runs_dir=tmp_path / "runs"))
+    config = ExperimentConfig(
+        name="x",
+        paths=PathSettings(runs_dir=tmp_path / "runs"),
+        generation=GenerationSettings(fill_styles=Style.evaluated()),
+    )
 
     data = ConfigLoader.dump(config)
 

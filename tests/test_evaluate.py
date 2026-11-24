@@ -192,7 +192,6 @@ def test_style_matrix_has_the_diagonal_for_human_windows(evaluated: EvaluatedTre
     assert len(human) == 4 * len(SWING)
     assert {row["diagonal_wins"] for row in human} == {"3"}
     assert {row["diagonal_rows"] for row in human} == {"3"}
-    assert all(GrooveMetric.DRUM_PATTERN_CONSISTENCY.value in row["excluded_metrics"].split(";") for row in human)
     diagonal = [row for row in human if row["generated_style"] == row["reference_style"]]
     assert all(float(row["distance"]) == pytest.approx(0.0) for row in diagonal)
     assert all(row["row_minimum"] == "True" for row in diagonal)
